@@ -1,0 +1,693 @@
+# SPEC — MOVEMENT
+
+> Spec d'implémentation du système de mouvement d'OVERDRIVE. **Blueprint only (R1).**
+> Aucune valeur numérique ici : toutes les clés renvoient à `Docs/07_TUNING.md`.
+> Assets : `Docs/05_ARCHITECTURE.md`. Nommage : `Docs/06_CONVENTIONS.md`. Données : `Docs/08_DATA_SCHEMAS.md`.
+> Toutes les valeurs sont lues depuis `DA_Movement_Default` (`PDA_MovementData`), jamais en dur.
+
+---
+
+## 1. Vue d'ensemble
+
+### 1.1 Qui pilote quoi
+
+| Acteur | Responsabilité | Interdit |
+|---|---|---|
+| `CharacterMovementComponent` (CMC) | Moteur physique : gravité, collision, step-up, `MOVE_Walking/Falling/Flying` | Ne pas le remplacer |
+| `BPC_MovementState` | **Seul propriétaire** de `E_MovementState`. Vitesse interne, momentum, décroissance, grace, air strafe, pilotage frame par frame du CMC | Ne connaît pas les inputs |
+| `BPC_Slide` | Logique de slide uniquement. Demande l'état, ne l'écrit pas | Ne touche pas au momentum global |
+| `BPC_Dash` | Charges, cooldown, direction, profil de vélocité | idem |
+| `BPC_WallRide` | Traces murales, accroche, wall jump, cooldown same-wall | idem |
+| `BP_PlayerCharacter` | Reçoit les inputs Enhanced Input, appelle `TryStartX()` sur les composants, relaie les dispatchers vers le HUD | Aucune logique de mouvement |
+| `BPC_PlayerStats` | Applique les upgrades sur les valeurs lues de `DA_Movement_Default` | — |
+
+**Règle de flux** : `Input → BP_PlayerCharacter → BPC_<Mécanique>.TryStartX() → BPC_MovementState.RequestState() → (accepté ?) → la mécanique s'exécute.`
+Un composant qui n'obtient pas l'état **annule silencieusement** sa mécanique et ne consomme aucune ressource (charge, cooldown).
+
+### 1.2 Machine à états `E_MovementState`
+
+```
+                       ┌──────────────────────────────────────────────┐
+                       │                  DASHING                     │
+                       │  transitoire — entrable depuis TOUT état     │
+                       │  sauf Dashing. Sortie => recalcul d'état     │
+                       └──────────────────────────────────────────────┘
+                          ▲  IA_Dash + charge dispo          │ fin (Dash_Duration)
+     ─────────────────────┴──────────────────────────────────┴─────────────────────
+
+        ┌────────┐  input mvt   ┌─────────┐  IA_Sprint + fwd  ┌───────────┐
+        │  IDLE  │◄────────────►│ WALKING │◄─────────────────►│ SPRINTING │
+        └────────┘   speed~0    └─────────┘   relâche/recul   └───────────┘
+             │                       │                              │
+             │ IA_Jump               │ IA_Jump                      │ IA_Slide
+             │                       │                              │ ET Speed >= Slide_MinEntrySpeed
+             │                       │                              ▼
+             │                       │                        ┌──────────┐
+             │                       │                        │ SLIDING  │
+             │                       │                        └──────────┘
+             │                       │                              │
+             │                       │      IA_Jump / fin timer / vitesse < seuil / dé-crouch OK
+             ▼                       ▼                              ▼
+        ┌──────────────────────────────────────────────────────────────┐
+        │                          JUMPING                             │
+        └──────────────────────────────────────────────────────────────┘
+                                    │ VelZ <= 0
+                                    ▼
+        ┌──────────────┐   accroche mur valide    ┌──────────────┐
+        │   FALLING    │◄────────────────────────►│  WALLRIDING  │
+        └──────────────┘   wall jump / fin / plus └──────────────┘
+                │           de mur / input opposé
+                │ Landed
+                ▼
+        retour IDLE | WALKING | SPRINTING  (selon input + vitesse)
+```
+
+### 1.3 Table de transitions autorisées
+
+| Depuis \ Vers | Idle | Walking | Sprinting | Sliding | Jumping | Falling | WallRiding | Dashing |
+|---|---|---|---|---|---|---|---|---|
+| **Idle** | — | oui | non¹ | non | oui | oui | non | oui |
+| **Walking** | oui | — | oui | non² | oui | oui | non | oui |
+| **Sprinting** | non | oui | — | oui | oui | oui | non | oui |
+| **Sliding** | non | oui | oui | — | oui | oui | non | oui |
+| **Jumping** | non | non | non | non | — | oui | oui | oui |
+| **Falling** | oui | oui | oui | non³ | non⁴ | — | oui | oui |
+| **WallRiding** | non | non | non | non | oui⁵ | oui | non | oui |
+| **Dashing** | oui | oui | oui | oui | oui | oui | oui | — |
+
+¹ passe obligatoirement par `Walking` (le sprint exige de la vitesse). ² il faut d'abord atteindre `Slide_MinEntrySpeed` → `Sprinting`.
+³ le slide en l'air est **bufferisé**, pas exécuté (cf. §11). ⁴ le double saut n'existe pas (`Jump_MaxCount`), sauf coyote time.
+⁵ = wall jump. `Dashing` sort toujours vers l'état recalculé à partir de `MovementMode` + input, jamais vers `PreviousState` aveuglément.
+
+---
+
+## 2. `BPC_MovementState`
+
+Emplacement : `Content/OVERDRIVE/Player/Components/BPC_MovementState`.
+
+### 2.1 Variables
+
+| Nom | Type | Expo | Category | Rôle |
+|---|---|---|---|---|
+| `MovementData` | `PDA_MovementData` | Instance Editable | Movement | pointe `DA_Movement_Default` |
+| `bDebugEnabled` | Bool | Instance Editable | Debug | active l'overlay §13 |
+| `CurrentState` | `E_MovementState` | ReadOnly BP | Movement | **écriture privée** |
+| `PreviousState` | `E_MovementState` | ReadOnly BP | Movement | |
+| `HorizontalSpeed` | Float (uu/s) | ReadOnly BP | Movement | `VectorLength(Velocity.X, Velocity.Y, 0)` |
+| `VerticalSpeed` | Float (uu/s) | ReadOnly BP | Movement | `Velocity.Z` |
+| `CurrentSpeedCap` | Float (uu/s) | ReadOnly BP | Movement | cap actif, cf. §2.4 |
+| `GraceTimeRemaining` | Float (s) | ReadOnly BP | Movement | tant que > 0, pas de décroissance |
+| `LastGainAmount` / `LastGainSource` | Float / Name | ReadOnly BP | Debug | affichage debug |
+| `bIsGrounded` | Bool | ReadOnly BP | Movement | cache de `CMC.IsMovingOnGround()` |
+| `CachedCMC` | CharacterMovementComponent | — | — | résolu au `BeginPlay` (R6 §4) |
+
+Toutes les valeurs de tuning sont lues via `MovementData`, filtrées par `BPC_PlayerStats.GetModified(<Key>)`.
+Aucun `Get` de `DA_Movement_Default` en Tick : cacher la struct au `BeginPlay`, re-cacher sur `OnUpgradesApplied`.
+
+### 2.2 Fonctions publiques
+
+| Signature | Type | Rôle |
+|---|---|---|
+| `RequestState(NewState) → bool` | fonction | Vérifie §1.3, applique, fire `OnMovementStateChanged`. Retourne false si refusé |
+| `CanEnterState(NewState) → bool` | pure | Lit la table §1.3 (implémentée en `Switch on Enum` imbriqué, pas en DataTable) |
+| `GetCurrentState() → E_MovementState` | pure | |
+| `GetHorizontalSpeed() → Float` | pure | |
+| `GetSpeedRatio01() → Float` | pure | `HorizontalSpeed / Speed_HardCap`, clampé 0–1. Sert au **remplissage de `WBP_SpeedMeter`** uniquement. **Ne sert ni au FOV ni à `MPC_Global.PlayerSpeed01`** (cf. `11_ARBITRAGES D9` et §2.5) |
+| `AddSpeedGain(Amount, Source)` | fonction | Ajoute `Amount` uu/s dans l'axe horizontal courant, clamp `Speed_HardCap`, reset la grace, fire `OnSpeedGained` |
+| `ApplySpeedPenaltyPercent(Percent, Reason)` | fonction | Multiplie la vélocité horizontale par `(1 - Percent)`, arme `SpeedLoss_RecoveryGrace`, fire `OnSpeedPenaltyApplied` (`11_ARBITRAGES D11 / D12`) |
+| `SetHorizontalSpeed(NewSpeed)` | fonction | Conserve la direction, écrit `CMC.Velocity`. **Point d'entrée unique** des composants |
+| `SetSpeedCapOverride(NewCap, Duration)` | fonction | Cap temporaire (dash, wall ride) ; `Duration = 0` → permanent jusqu'à `ClearSpeedCapOverride()` |
+| `StartGrace(Duration)` | fonction | Arme `GraceTimeRemaining = Duration` (typiquement `MomentumDecay_GraceTime`) : suspend la décroissance §2.4-5. Appelée par `BPC_Dash` (§8), `BPC_WallRide` (§9.3) et les pénalités §10.2 |
+| `IsGrounded() → bool` | pure | |
+
+### 2.3 Event Dispatchers
+
+`OnMovementStateChanged(OldState, NewState)` · `OnSpeedChanged(NewSpeed, Delta)` · `OnSpeedGained(Amount, Source)` ·
+`OnSpeedPenaltyApplied(OldSpeed, NewSpeed, Percent, Reason)` · `OnLanded(ImpactSpeed, bWasHardImpact)` · `OnGraceExpired()`
+
+Le HUD (`WBP_SpeedMeter`) **bind** `OnSpeedChanged`, il ne tick pas (`05_ARCHITECTURE §3`) et se rafraîchit à **20 Hz** (§2.5).
+
+### 2.4 Boucle par frame
+
+Tick **activé et justifié en commentaire dans le BP** (exception explicite à `06_CONVENTIONS §4.6` : le momentum est continu).
+`Tick Group = TG_PrePhysics`. Au `BeginPlay`, appeler `AddTickPrerequisiteComponent(CachedCMC)` pour que nos écritures
+de `Velocity` arrivent **après** la mise à jour interne du CMC (sinon elles sont écrasées le même frame).
+
+```
+TICK(dt)
+ 1. bIsGrounded = CMC.IsMovingOnGround()
+    HorizontalSpeed = Length(Velocity * (1,1,0)) ; VerticalSpeed = Velocity.Z
+ 2. RESOLVE_STATE : si l'état courant n'est pas piloté par un composant (Sliding/Dashing/WallRiding),
+    recalculer Idle/Walking/Sprinting/Jumping/Falling depuis MovementMode + input + HorizontalSpeed.
+ 3. EffectiveCap = Speed_SprintCap          (07_TUNING §3, modulé par BPC_PlayerStats)
+    CurrentSpeedCap = SpeedCapOverride si actif, sinon EffectiveCap
+ 4. GRACE : si GraceTimeRemaining > 0 → GraceTimeRemaining -= dt ; si passe à 0 → OnGraceExpired
+ 5. DECAY : si HorizontalSpeed > CurrentSpeedCap ET GraceTimeRemaining <= 0 ET bIsGrounded
+              ET CurrentState ∈ {Idle, Walking, Sprinting} :
+       NewSpeed = Max(CurrentSpeedCap, HorizontalSpeed - MomentumDecayRate * dt)
+       SetHorizontalSpeed(NewSpeed)
+    → la décroissance ne s'applique **jamais** en l'air, en slide, en dash ni en wall ride.
+ 6. DRIVE_CMC :
+       CMC.MaxWalkSpeed      = Max(CurrentSpeedCap, HorizontalSpeed)   ← anti-freinage, cf. §15
+       CMC.MaxAcceleration   = Accel_Ground si au sol, sinon Accel_Air
+       CMC.GravityScale      = Gravity, sauf override composant (Dash/WallRide)
+ 7. AIR_STRAFE : si CMC.MovementMode == Falling ET CurrentState ∉ {Dashing, WallRiding} → §7
+ 8. HARD_CLAMP : si HorizontalSpeed > Speed_HardCap → SetHorizontalSpeed(Speed_HardCap)
+ 9. si |HorizontalSpeed - LastBroadcastSpeed| > 1.0 → OnSpeedChanged
+10. si bDebugEnabled → §13
+```
+
+**Aucune écriture dans `MPC_Global` en Tick** : elle se fait dans le timer 20 Hz de §2.5.
+
+**Momentum** = tout ce qui dépasse `Speed_SprintCap`. Il n'existe pas de variable `Momentum` séparée :
+le momentum **est** la vélocité du CMC. Une seule source de vérité, aucune désynchronisation possible.
+
+### 2.5 Timer 20 Hz — effets de vitesse (`11_ARBITRAGES D9`)
+
+Un **timer looping unique à 20 Hz**, démarré au `BeginPlay` de `BPC_MovementState`, est le **seul écrivain**
+de `MPC_Global.PlayerSpeed01`. Il alimente aussi le vent (`MS_Wind_Speed`) : une seule cadence, un seul
+point de maintenance.
+
+```
+EVENT SpeedEffectsTick   (timer looping, 20 Hz)
+  PlayerSpeed01 = Clamp( (HorizontalSpeed - SpeedLines_StartSpeed)
+                         / (SpeedLines_FullSpeed - SpeedLines_StartSpeed), 0, 1 )   (07_TUNING §16)
+  SetScalarParameterValue(MPC_Global, "PlayerSpeed01", PlayerSpeed01)
+  MS_Wind_Speed = PlayerSpeed01                                    // même valeur, même cadence
+```
+
+- La normalisation se fait sur `SpeedLines_StartSpeed` / `SpeedLines_FullSpeed`, **jamais** sur `Speed_HardCap` :
+  ce scalaire n'existe que pour les **effets de vitesse** (speed lines, aberration chromatique, vignette).
+  Normalisé sur le hard cap, les effets seraient invisibles avant 5000 uu/s.
+- **`BPC_PlayerStats` n'écrit rien dans `MPC_Global`.**
+- **Le FOV n'utilise pas `PlayerSpeed01`** : il lit la vitesse brute via `CF_FOVBySpeed` (`SPEC_CAMERA_JUICE §2`).
+
+---
+
+## 3. Sprint
+
+- **Entrée** : `IA_Sprint` (mode `Sprint_Mode`, 07_TUNING §4) + input avant si `Sprint_RequiresForwardInput` + `bIsGrounded`.
+- **Montée** : `CurrentSpeedCap` interpolé de `Speed_Walk` à `Speed_SprintCap` en `Sprint_TimeToMax` (`FInterp To Constant`).
+- **Sortie** : relâche (mode Hold), input arrière, perte du sol (→ `Jumping`/`Falling`, le cap reste), entrée en `Sliding`.
+- **Interaction avec le cap** : le sprint **ne peut jamais** dépasser `Speed_SprintCap`. Si `HorizontalSpeed` est déjà
+  au-dessus (momentum acquis), le sprint ne freine pas — il maintient simplement `MaxWalkSpeed` (étape 6 §2.4) et
+  laisse la décroissance §2.4-5 opérer. Sprint = **plancher confortable**, pas un accélérateur.
+
+---
+
+## 4. Slide — `BPC_Slide`
+
+### 4.1 Séquence d'implémentation
+
+```
+[1] IA_Slide pressé (BP_PlayerCharacter) → BPC_Slide.TryStartSlide()
+[2] GARDES (toutes doivent passer, sinon crouch simple ou rien) :
+      bIsGrounded == true
+      HorizontalSpeed >= Slide_MinEntrySpeed            (07_TUNING §5)
+      TimeSince(LastSlideEnd) >= Slide_Cooldown
+      MovementState.RequestState(Sliding) == true
+    → si bIsGrounded == false : ne rien faire, armer SlideBufferTimestamp (cf. §11)
+    → si vitesse insuffisante : Crouch() simple, pas de slide, pas de cooldown consommé
+[3] RESIZE CAPSULE :
+      CachedHalfHeight = Capsule.GetScaledCapsuleHalfHeight()
+      SetCapsuleSize(CapsuleRadius, CapsuleHalfHeight_Slide, bUpdateOverlaps=true)   (07_TUNING §2)
+      Compenser la caméra : offset -(CapsuleHalfHeight - CapsuleHalfHeight_Slide) interpolé
+      sur Slide_CameraDrop, + roulis Slide_CameraTilt
+[4] BOOST : MovementState.AddSpeedGain(Slide_EntryBoost, "SlideEntry")
+      Direction = vélocité horizontale normalisée (PAS la caméra : on ne tourne pas gratuitement)
+[5] FRICTION : CMC.GroundFriction = Slide_Friction ; CMC.BrakingDecelerationWalking = 0
+      Courbe de fin : CF_SlideFrictionOverTime (08_DATA_SCHEMAS §5), domaine = T/Slide_MaxDuration
+[6] PENTES (évalué chaque frame du slide) :
+      Trace descendante depuis le bas de la capsule (longueur = MaxStepHeight)
+      SlopeDot = Dot(FloorNormal, VelocityDir)
+        SlopeDot > 0.05  (descente) → AddImpulse horizontal = VelocityDir * Slide_SlopeAccelBonus * dt
+                                       ET ne PAS décrémenter le timer de durée
+        SlopeDot < -0.05 (montée)   → friction ×2, le slide s'éteint naturellement
+        sinon (plat)                → rien
+[7] TIMER : Slide_MaxDuration. Sur plat/montée uniquement (cf. [6]).
+[8] SORTIE — déclencheurs : timer écoulé · relâche de IA_Slide · HorizontalSpeed < Slide_ExitSpeedMin
+      · IA_Jump (→ §4.3) · perte du sol
+```
+
+### 4.2 Le piège du dé-crouch bloqué
+
+`SetCapsuleSize` **ne teste rien** : agrandir la capsule sous un plafond bas la fait pénétrer la géométrie,
+puis le CMC la dépénètre violemment (téléport vertical, perte totale de vitesse, parfois chute à travers le sol).
+
+Procédure obligatoire à la sortie de slide :
+
+```
+CanUncrouch():
+    Start = ActorLocation
+    End   = ActorLocation + (0,0, CapsuleHalfHeight - CapsuleHalfHeight_Slide)
+    Hit   = CapsuleTraceForObjects(
+              Start, End,
+              Radius     = CapsuleRadius,
+              HalfHeight = CapsuleHalfHeight,
+              ObjectTypes = [WorldStatic, WorldDynamic, WallRideSurface],
+              IgnoreSelf = true)
+    return NOT Hit.bBlockingHit
+
+EndSlide():
+    if CanUncrouch():
+        SetCapsuleSize(CapsuleRadius, CapsuleHalfHeight)  → état recalculé
+    else:
+        rester en Sliding, bForcedSlide = true
+        friction = Slide_Friction (on continue de glisser sous le plafond)
+        retester CanUncrouch() chaque frame
+        si HorizontalSpeed atteint 0 sous le plafond → rester crouché, autoriser le déplacement lent
+```
+
+Le timer `Slide_MaxDuration` est **suspendu** tant que `bForcedSlide` est vrai : on ne peut pas être puni
+d'être coincé sous un plafond.
+
+### 4.3 Slide → Jump
+
+Un `IA_Jump` pendant un slide, ou dans les `Slide_JumpWindow` secondes qui suivent sa fin, **conserve intégralement**
+`HorizontalSpeed` (aucun re-clamp par `MaxWalkSpeed`, cf. §15) et applique `Jump_ZVelocity`. C'est le combo central du jeu.
+Passer par `CanUncrouch()` avant : si bloqué, le saut est refusé et l'input part dans le jump buffer (§5).
+
+---
+
+## 5. Jump / Coyote time / Jump buffer
+
+```
+VARIABLES (BPC_MovementState)
+  LastGroundedTime   : Float  ← World Time Seconds, écrit chaque frame où bIsGrounded
+  JumpBufferedTime   : Float  ← World Time Seconds au moment d'un IA_Jump non consommé
+  bJumpConsumed      : Bool   ← empêche le double saut pendant la coyote window
+
+TryJump()  ← appelé par IA_Jump ET par OnLanded
+  if bIsGrounded OR ( (Now - LastGroundedTime) <= Jump_CoyoteTime AND NOT bJumpConsumed ):
+        DoJump()
+        bJumpConsumed = true
+        JumpBufferedTime = -1
+  else:
+        JumpBufferedTime = Now                     ← buffer armé
+
+DoJump()
+  SavedHorizontal = Velocity * (1,1,0) * SpeedRetention_Jump      (07_TUNING §3)
+  BunnyHopCheck()                                                  ← §6, AVANT l'impulsion
+  Velocity = SavedHorizontal + (0,0, Jump_ZVelocity)               ← Set Velocity, PAS Launch (§15)
+  RequestState(Jumping)
+
+OnLanded(Hit)                                                      ← Event Landed du Character
+  bJumpConsumed = false
+  LandedTime    = Now
+  Velocity.XY  *= SpeedRetention_Landing                           (07_TUNING §3)
+  if (Now - JumpBufferedTime) <= Jump_BufferTime:
+        JumpBufferedTime = -1
+        DoJump()                                                   ← saut immédiat, même frame
+```
+
+`Jump_MaxCount = 1` (07_TUNING §6) : `CMC.JumpMaxCount = 1`, le double saut est remplacé par le dash.
+`CMC.bApplyGravityWhileJumping = true`, `AirControl` = `AirStrafe_AirControl` (§7).
+
+---
+
+## 6. Bunny hop
+
+Le bunny hop est le mécanisme qui **annule la punition de l'atterrissage** et donne un gain net.
+
+| Élément | Comportement | Clé |
+|---|---|---|
+| Fenêtre | `Now - LandedTime <= BHop_PerfectWindow` au moment de `DoJump()` | `BHop_PerfectWindow` (§6) |
+| Skip de friction | Si `BHop_FrictionSkip` : dès `OnLanded`, `GroundFriction = 0` et `BrakingDecelerationWalking = 0` pendant toute la fenêtre. Restauration à `GroundFriction`/`BrakingDecelerationWalking` (07_TUNING §2) à l'expiration | `BHop_FrictionSkip` |
+| Annulation de la perte | Dans la fenêtre, `SpeedRetention_Landing` **n'est pas appliqué** (restaurer la vitesse d'avant-atterrissage mise en cache dans `PreLandSpeed`) | — |
+| Gain | `AddSpeedGain(BHop_SpeedGain, "BunnyHop")` | `BHop_SpeedGain` |
+| Plafond de chaîne | `ChainGainAccumulated += BHop_SpeedGain`, clampé à `BHop_MaxChainGain`. Au-delà : hop valide (pas de perte) mais gain = 0 | `BHop_MaxChainGain` |
+| Reset de chaîne | `ChainGainAccumulated = 0` et `ChainCount = 0` dès qu'un atterrissage n'est **pas** suivi d'un saut dans la fenêtre, ou sur `ApplySpeedPenaltyPercent` | — |
+
+**Feedback attendu** (obligatoire, sinon la mécanique est illisible) : son de hop dont le pitch monte avec `ChainCount`,
+flash court sur `WBP_SpeedMeter`, compteur `x N` à l'écran. Un hop raté doit s'entendre différemment d'un hop réussi.
+
+---
+
+## 7. Air strafing — modèle Quake/Source
+
+### 7.1 Modèle mathématique
+
+Le CMC applique déjà un air control classique (`AirControl` = `AirStrafe_AirControl`, 07_TUNING §7) qui gère **la direction**.
+Par-dessus, `BPC_MovementState` applique l'accélération vectorielle qui gère **le gain de vitesse** :
+
+```
+AIR_ACCELERATE(dt)
+  ── entrées ────────────────────────────────────────────────────────────────
+  MoveInput   = (IA_Move.X, IA_Move.Y)                      // -1..1, brut
+  if Length(MoveInput) < 0.05          : return             // pas d'input → pas de gain
+  WishDir     = Normalize( ControlRotationYawOnly.RightVector  * MoveInput.X
+                         + ControlRotationYawOnly.ForwardVector * MoveInput.Y )
+  WishDir.Z   = 0 ; WishDir = Normalize(WishDir)
+  HorizVel    = Velocity * (1,1,0)
+
+  ── garde-fous ─────────────────────────────────────────────────────────────
+  if Length(HorizVel) >= AirStrafe_NoGainAboveSpeed : return
+  VelDir = Normalize(HorizVel)  (si Length ~ 0 → VelDir = WishDir)
+  // Gate : pas de gain si l'input pointe quasiment à l'opposé de la vélocité.
+  // Seuil = cos(90° + AirStrafe_GainAngleMax)
+  if Dot(WishDir, VelDir) < Cos( DegToRad(90 + AirStrafe_GainAngleMax) ) : return
+
+  ── coeur Quake ────────────────────────────────────────────────────────────
+  WishSpeed    = AirStrafe_WishSpeedCap        // 07_TUNING §7
+  CurrentSpeed = Dot(HorizVel, WishDir)        // projection scalaire de la vélocité sur l'input
+  AddSpeed     = WishSpeed - CurrentSpeed
+  if AddSpeed <= 0 : return                    // déjà assez rapide dans cette direction
+
+  AccelSpeed   = AirStrafe_MaxAccel * dt
+  AccelSpeed   = Min(AccelSpeed, AddSpeed)                       // clamp #1 (Quake)
+  AccelSpeed   = Min(AccelSpeed, AirStrafe_SpeedGainPerSec * dt) // clamp #2 (garde-fou OVERDRIVE)
+
+  NewVel   = HorizVel + WishDir * AccelSpeed
+  NewVel   = ClampVectorSize(NewVel, 0, Speed_HardCap)
+  Velocity = (NewVel.X, NewVel.Y, Velocity.Z)                    // Z jamais touché
+```
+
+**Pourquoi ça marche** : `CurrentSpeed` est la projection, pas la norme. Quand `WishDir` est ~perpendiculaire à la
+vélocité (souris qui tourne + strafe latéral maintenu), la projection est proche de 0, donc `AddSpeed ≈ WishSpeed`,
+donc on ajoute un vecteur presque orthogonal → la **norme** augmente sans plafonner. C'est exactement ce qui rend
+le strafe apprenable : le gain dépend de la coordination souris/clavier, pas du hasard.
+
+`AirStrafe_WishSpeedCap` (`07_TUNING §7`) contrôle la « largeur » de la fenêtre de gain : valeur basse = strafe
+exigeant, valeur haute = gain facile. Ne jamais la coder en dur ici — elle se règle dans `07_TUNING` uniquement.
+
+### 7.2 Reproduction en Blueprint (sans C++)
+
+1. `BPC_MovementState` : Tick activé, `AddTickPrerequisiteComponent(CachedCMC)` au `BeginPlay` → notre écriture de
+   `Velocity` se produit après le calcul du CMC et survit jusqu'au frame suivant.
+2. `MoveInput` est mis en cache par `BP_PlayerCharacter` dans une variable `CachedMoveInput` (écrite par `IA_Move`,
+   remise à zéro sur `Completed`). Ne jamais relire l'input depuis le composant.
+3. Écriture via **`Set Velocity`** sur le CMC (nœud `Velocity` exposé en BP), jamais `AddImpulse` ni `Launch Character` (§15).
+4. `CMC.MaxAcceleration` doit valoir au moins `AirStrafe_MaxAccel` pendant `Falling`, sinon le CMC re-clampe (§15).
+5. Ordre dans le Tick : l'air strafe passe **avant** le hard clamp (étape 8 §2.4).
+6. Vérification : en sandbox, sauter puis maintenir `A` + tourner la souris lentement vers la gauche doit faire
+   monter `SPEED` de façon continue. Si la vitesse stagne, le suspect n°1 est `MaxAcceleration`, le n°2 est l'ordre de Tick.
+
+---
+
+## 8. Dash 360° — `BPC_Dash`
+
+```
+TryDash()
+ [1] GARDES : Charges > 0 ET CurrentState != Dashing ET RequestState(Dashing)
+ [2] DIRECTION :
+        if Length(CachedMoveInput) >= 0.05 :
+             DashDir = Normalize( YawRight * Input.X + YawForward * Input.Y )   // 360° réel
+        else :
+             DashDir = CameraForwardVector                                       // fallback caméra
+        if bIsGrounded AND Dash_ZLockOnGround : DashDir.Z = 0 ; renormaliser
+ [3] CONSERVATION : EntrySpeed = Max( HorizontalSpeed * Dash_SpeedRetention, Dash_MinExitSpeed )
+        DashSpeed  = Dash_Distance / Dash_Duration
+        TargetSpeed = Max(EntrySpeed, DashSpeed)     ← un dash ne ralentit JAMAIS le joueur
+ [4] EXÉCUTION : CMC.GravityScale = Dash_GravityScale ; CMC.BrakingDecelerationFalling = 0
+        Timeline de longueur Dash_Duration, courbe CF_DashVelocity (08_DATA_SCHEMAS §5)
+        chaque frame : Velocity = DashDir * TargetSpeed * CF_DashVelocity(Alpha)
+        Z verrouillé à 0 pendant toute la durée si Dash_ZLockOnGround et dash au sol
+ [5] FEEDBACK : Dash_FOVKick sur BP_PlayerCameraManager, OnDashPerformed → BPC_StyleMeter
+ [6] SORTIE : restaurer GravityScale = Gravity
+        HorizontalSpeed = Max(HorizontalSpeed, Dash_MinExitSpeed)
+        MovementState.StartGrace(MomentumDecay_GraceTime)
+        recalcul d'état depuis MovementMode + input (jamais PreviousState brut)
+ [7] CHARGES : consommée à [1]. Recharge : timer Dash_Cooldown par charge, cumulable jusqu'à Dash_MaxCharges
+        Upgrade `DashRechargeOnKill` : décrémente le timer, ne donne pas de charge instantanée
+```
+
+Toutes les clés : 07_TUNING §8. `Dash_IFrames = 0` → **le dash n'esquive pas**, il repositionne (GDD §13).
+
+| | Ce qui annule le dash | Ce que le dash annule |
+|---|---|---|
+| | Atterrissage sur un mur bloquant (collision frontale §10) | `Sliding` (sortie propre : dé-crouch via `CanUncrouch()`) |
+| | Mort / respawn | La friction de sol en cours |
+| | Accroche wall ride réussie pendant le dash | La décroissance de momentum (grace armée à la sortie) |
+| | — | L'inertie verticale (`GravityScale = 0` pendant la durée) |
+
+Le dash **ne s'annule pas** sur un dégât reçu, ni sur un input contraire, ni sur un saut : sa durée est atomique.
+
+---
+
+## 9. Wall Ride — `BPC_WallRide`
+
+### 9.1 Détection
+
+```
+DetectWall()                       ← Timer looping, actif UNIQUEMENT si CMC.MovementMode == Falling
+  Origin = CapsuleWorldLocation
+  for Side in [Right, Left]:
+      Dir    = ActorRightVector * (Side == Right ? 1 : -1)
+      Start  = Origin
+      End    = Origin + Dir * (CapsuleRadius + WallRide_DetectDistance)      (07_TUNING §9)
+      Hit    = LineTraceForObjects(Start, End, ObjectTypes = [WallRideSurface], IgnoreSelf = true)
+      if Hit.bBlockingHit AND IsValidWall(Hit) : return Hit
+  return none
+
+IsValidWall(Hit)
+  Verticalité : Abs( Dot(Hit.Normal, WorldUp) ) <= Sin( DegToRad(WallRide_MaxWallAngle) )
+  Vitesse     : HorizontalSpeed >= WallRide_MinEntrySpeed
+  Same-wall   : NOT ( Hit.Component == LastWallComponent
+                      AND (Now - LastWallDetachTime) < WallRide_SameWallCooldown )
+  Direction   : Dot( Normalize(HorizVel), Hit.Normal ) < 0     // on va vers le mur, pas dos à lui
+```
+
+- **Canal** : object type **`WallRideSurface`** exclusivement (07_TUNING §9, 06_CONVENTIONS §7). Traces `ForObjects`,
+  jamais `ByChannel` : impossible d'accrocher un ennemi, un prop ou de la géo décorative.
+- **Fréquence** : Timer looping à `WallRide_TraceInterval` (`07_TUNING §9`).
+  Le timer est **démarré** sur `OnMovementModeChanged → Falling` et **stoppé** sur `Landed`. Aucune trace au sol.
+- 2 traces par évaluation maximum. Ne jamais tracer depuis la caméra.
+
+### 9.2 Accroche, maintien, sortie
+
+| Phase | Comportement |
+|---|---|
+| Accroche | `RequestState(WallRiding)` · `SetMovementMode(MOVE_Flying)` · `GravityScale = WallRide_GravityScale` · `Velocity.Z += WallRide_UpwardBoost` · roulis caméra `WallRide_CameraTilt` vers l'extérieur |
+| Maintien (par frame) | `WallDir = Cross(Hit.Normal, WorldUp)` orienté par `Dot(WallDir, HorizVel)` · `Velocity.XY = WallDir * HorizontalSpeed * WallRide_SpeedRetention^dt` · coller au mur : composante de `Velocity` le long de `-Normal` = 0 · re-trace chaque intervalle pour confirmer le mur |
+| Sortie — durée | `WallRide_MaxDuration` écoulé → `Falling`, `GravityScale` restauré |
+| Sortie — plus de mur | Trace négative 2 évaluations consécutives (anti-flicker sur les joints de modules) → `Falling` |
+| Sortie — saut | `IA_Jump` → **Wall Jump** (§9.3) |
+| Sortie — input opposé | `Dot(WishDir, Hit.Normal) > 0.7` maintenu ≥ 0.1 s → décrochage volontaire, `Falling`, conserve la vitesse |
+| Dans tous les cas | `LastWallComponent = Hit.Component` · `LastWallDetachTime = Now` · `SetMovementMode(MOVE_Falling)` · reset `GravityScale = Gravity` · reset du roulis caméra |
+
+### 9.3 Wall Jump
+
+```
+Velocity =  HorizVelPreserved                                  // momentum conservé
+         +  Hit.Normal              * WallJump_AwayVelocity
+         +  CameraForwardHorizontal * WallJump_ForwardBoost
+         +  WorldUp                 * WallJump_ZVelocity
+ClampVectorSize2D → Speed_HardCap ; RequestState(Jumping) ; StartGrace(MomentumDecay_GraceTime)
+```
+Le `WallRide_SameWallCooldown` s'applique aussi après un wall jump : impossible de pomper un mur unique.
+Murs opposés → alternance libre (c'est le combo recherché, cf. 07_TUNING §17 distances entre murs).
+
+---
+
+## 10. Perte de vitesse & collisions
+
+### 10.1 Classification d'un impact
+
+Sur `Event Hit` du `CapsuleComponent` (activer *Simulation Generates Hit Events*) :
+
+```
+VelDir      = Normalize(Velocity * (1,1,0))
+ImpactAngle = RadToDeg( Asin( Clamp( Dot(VelDir, -Hit.ImpactNormal), -1, 1 ) ) )
+              // 90° = pleine face   |   0° = rasant (parallèle au mur)
+```
+
+| Condition | Effet | Source |
+|---|---|---|
+| `ImpactAngle > 60` ET `HorizontalSpeed > 2500` | `ApplySpeedPenaltyPercent(0.50, "HardCollision")` + `Shake_HardCollision` + son d'impact | 07_TUNING §10 / §16 |
+| `ImpactAngle > 60` ET vitesse ≤ seuil | Aucune pénalité (le CMC arrête naturellement) | 07_TUNING §10 |
+| `ImpactAngle < 30` | **0 %**. On glisse le long : `Velocity = Velocity - Normal * Dot(Velocity, Normal)`, renormalisé à la vitesse d'avant impact | 07_TUNING §10 |
+| `30 <= ImpactAngle <= 60` | `ApplySpeedPenaltyPercent(SpeedLoss_Collision_MidAngle, "MidAngleCollision")` — transition continue entre 0 % et 50 % | 07_TUNING §10 |
+| Projectile / melee ennemi encaissé | `ApplySpeedPenaltyPercent` avec `S_DamageInfo.SpeedPenaltyPercent` (08_DATA_SCHEMAS §2) | 07_TUNING §10 / §13 |
+
+### 10.2 Grace de récupération
+
+Toute pénalité arme `GraceTimeRemaining = SpeedLoss_RecoveryGrace` (07_TUNING §10). Pendant cette fenêtre :
+la décroissance de momentum est suspendue, le joueur peut reconstruire (slide-jump, dash) sans être doublement puni.
+Une pénalité **reset la chaîne de bunny hop** et **reset le `BPC_StyleMeter`** via `E_StyleEvent.TookDamage`.
+Anti-spam : deux `Event Hit` sur le même composant à moins de 0.2 s → une seule pénalité (mise en cache de `LastHitComponent`).
+
+---
+
+## 11. Interactions entre mécaniques
+
+| Situation | Résolution |
+|---|---|
+| **Dash pendant Slide** | Dash accepté. Fin de slide propre (`CanUncrouch()` ; si bloqué, la capsule reste basse et le dash s'exécute quand même). Direction = input, pas la direction de slide. |
+| **Slide pendant Dash** | Refusé (`Dashing → Sliding` interdit, §1.3). L'input est bufferisé : si `IA_Slide` est encore maintenu à la fin du dash et que les gardes §4.1 passent, le slide démarre. |
+| **Slide en l'air** | Aucun slide. `SlideBufferTimestamp = Now`. À l'atterrissage, si `Now - SlideBufferTimestamp <= Jump_BufferTime` et gardes OK → slide immédiat. C'est le « slide d'atterrissage », central pour le flow. |
+| **Dash pendant Wall Ride** | Dash accepté, décroche le mur, arme `WallRide_SameWallCooldown`. Direction 360° normale. |
+| **Wall Ride pendant Dash** | Refusé pendant `Dash_Duration` (la détection est stoppée). La détection reprend à la sortie ; un mur adjacent s'accroche donc au frame suivant. |
+| **Jump pendant Slide** | Autorisé → §4.3, conserve tout le momentum. |
+| **Jump pendant Wall Ride** | = Wall Jump, §9.3. Jamais un saut normal. |
+| **Jump pendant Dash** | Refusé pendant la durée. Bufferisé via `JumpBufferedTime`, consommé à la sortie si dans `Jump_BufferTime`. |
+| **Dash pendant Jump/Falling** | Accepté. `Dash_ZLockOnGround` ne s'applique pas → dash 3D possible vers le haut/bas. |
+| **Sprint pendant Slide** | Ignoré. Le sprint reprend automatiquement à la sortie si `IA_Sprint` est maintenu. |
+| **Wall Ride pendant Slide** | Impossible : le slide est un état sol, la détection murale ne tourne qu'en `Falling`. |
+| **Bunny hop après Slide** | Oui : sortie de slide → saut dans `Slide_JumpWindow` → atterrissage → hop dans `BHop_PerfectWindow`. La chaîne cumule les deux gains, clampés par `BHop_MaxChainGain` puis `Speed_HardCap`. |
+| **Air strafe pendant Dash** | Désactivé (`CurrentState == Dashing` exclu à l'étape 7 §2.4). Le dash est une trajectoire, pas une suggestion. |
+| **Air strafe pendant Wall Ride** | Désactivé. Le wall ride pilote la vélocité intégralement. |
+| **Dégât pendant Dash** | Le dash termine sa course. La pénalité de vitesse s'applique à la sortie, sur la vitesse post-dash. |
+| **Dégât pendant Wall Ride** | Décrochage immédiat → `Falling` + pénalité. Feedback fort obligatoire (shake + son). |
+| **Collision frontale pendant Slide** | Pénalité §10 normale + fin de slide forcée (si `CanUncrouch()` échoue, `bForcedSlide`). |
+| **Collision frontale pendant Dash** | Le dash est interrompu (seul cas d'annulation). Pénalité §10 appliquée. |
+| **Dash au sol vers le haut** | Impossible si `Dash_ZLockOnGround` : `DashDir.Z` forcé à 0. Sauter d'abord. |
+| **2 dashs consécutifs** | Uniquement si `Dash_MaxCharges >= 2` (upgrade). Sinon refusé, aucun feedback trompeur : son « no charge » distinct. |
+
+---
+
+## 12. Setup de collision (Project Settings → Collision)
+
+### Object Channels à créer
+| Nom | Default Response |
+|---|---|
+| `WallRideSurface` | Block |
+
+### Trace Channels à créer
+| Nom | Default Response |
+|---|---|
+| `Weapon` | Block |
+
+`ECC_GameTraceChannel1` = `Projectile`, déjà présent (template) → conservé (06_CONVENTIONS §7).
+
+### Presets
+
+| Preset | Object Type | WorldStatic | WorldDynamic | Pawn | PhysicsBody | WallRideSurface | Visibility | Camera | Projectile | Weapon |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `OD_Player` | Pawn | Block | Block | Block | Block | Block | Block | Ignore | Block | Ignore |
+| `OD_Enemy` | Pawn | Block | Block | Block | Block | Block | Block | Ignore | Block | Block |
+| `OD_EnemyProjectile` | WorldDynamic | Block | Ignore | Block | Ignore | Block | Ignore | Ignore | Ignore | Ignore |
+| `OD_WallRideSurface` | **WallRideSurface** | Block | Block | Block | Block | Block | Block | Block | Block | Block |
+| `OD_LevelGeo` | WorldStatic | Block | Block | Block | Block | Block | Block | Block | Block | Block |
+
+**Piège** : un mesh en `OD_WallRideSurface` **n'est plus** de type `WorldStatic`. Toute trace `ForObjects` qui n'inclut
+que `WorldStatic` cessera de le voir (notamment `CanUncrouch()` §4.2 et les traces de sol) → inclure systématiquement
+`WallRideSurface` dans les listes d'object types de la navigation et des traces de dé-crouch.
+
+---
+
+## 13. Debug
+
+### 13.1 Overlay (activé par `bDebugEnabled`, dessiné par `BPC_MovementState`)
+
+```
+STATE      : Sprinting   (prev: Walking)
+SPEED      : 2840 uu/s   (HUD 284)   |   VZ: -120
+CAP        : 1500        DECAY: ON   GRACE: 0.00 s
+LAST GAIN  : +400  "SlideEntry"  (0.42 s ago)
+BHOP       : chain 3     accum +360 / 1500
+DASH       : 0/1 charges  cd 0.91 s
+SLIDE      : t 0.00 / 1.20   cd 0.13 s   forced: no
+WALLRIDE   : t --- / 2.00   samewall cd 0.00 s   last: SM_Module_Wall_800_12
+JUMP       : coyote 0.00   buffer ---   consumed: yes
+CMC        : MaxWalkSpeed 2840  MaxAccel 4000  GravityScale 2.4  Mode Walking
+```
+
+Dessins 3D : les 2 traces de wall ride (vert = valide, rouge = rejeté + raison), la capsule de `CanUncrouch()`,
+le vecteur `WishDir` (bleu) et le vecteur `Velocity` (jaune), le point d'impact + `ImpactAngle` du dernier `Event Hit`.
+Toggle : **`IA_DebugToggle` sur `F1`** (`11_ARBITRAGES D15`, `09_INPUT`), uniquement en build Development.
+
+### 13.2 `L_Sandbox_Movement` (`Content/OVERDRIVE/Levels/Sandbox/`)
+
+Grille 100 uu (06_CONVENTIONS §6). Chaque zone testable **isolément**, séparée et étiquetée par un `TextRender`.
+
+| Zone | Construction | Ce qu'elle teste |
+|---|---|---|
+| A — Ligne droite | Couloir plat 8000 uu, largeur 800 uu, marques au sol tous les 1000 uu | Sprint cap, décroissance, lecture de vitesse |
+| B — Tunnel bas | Tunnel de 20000 uu de long, hauteur intérieure **inférieure à `CapsuleHalfHeight × 2`** et supérieure à `CapsuleHalfHeight_Slide × 2` | Slide sous obstacle + **dé-crouch bloqué** (§4.2) |
+| C — Rampes | Rampes descendantes 15° / 30° / 45° et montantes idem, longueur 1600 uu | `Slide_SlopeAccelBonus`, extinction en montée |
+| D — Escaliers | Marches de 25 / 50 / 75 uu | `MaxStepHeight`, accrochage d'arête (§15) |
+| E — Couloir wall ride | 2 murs `OD_WallRideSurface` parallèles, écartements 600 / 1000 / 1400 uu (07_TUNING §17), hauteur 800 uu | Alternance de wall rides, `SameWallCooldown` |
+| F — Mur unique | 1 mur `OD_WallRideSurface` de 1600 uu, sol supprimé sur 400 uu devant | Wall ride long, durée max, wall jump |
+| G — Gouffres | Gaps de 600 / 900 / 1200 uu | Dash de franchissement, coyote time (bord marqué) |
+| H — Plafond bas + saut | Plateforme à 300 uu avec plafond bas au-dessus | Jump buffer, dé-crouch bloqué en l'air |
+| I — Piliers | 4 piliers 200×200 au milieu du couloir A | Collision frontale (>60°) |
+| J — Murs biseautés | Murs à 15° et 25° par rapport à l'axe du couloir | Collision rasante (<30°), glissement |
+| K — Circuit combo | Boucle fermée : rampe → slide → gap → wall ride → wall jump → atterrissage → hop | Enchaînement complet, mesure de vitesse de pointe |
+
+Un `BP_SpeedGate` (Dev/Debug, jetable) placé en A et K : `Print` de la vitesse au passage.
+
+---
+
+## 14. Checklist de validation manuelle (Louis)
+
+**Sprint**
+- [ ] Sprint seul se stabilise exactement à `Speed_SprintCap`, jamais au-dessus
+- [ ] Relâcher tout input au-dessus du cap : la vitesse redescend après `MomentumDecay_GraceTime`, pas avant
+- [ ] La montée en vitesse ne donne pas l'impression d'être « collant »
+
+**Slide**
+- [ ] Le slide est refusé sous `Slide_MinEntrySpeed` (crouch simple, sans frustration)
+- [ ] Le boost d'entrée se **sent** : gain net perceptible sans regarder le HUD
+- [ ] En descente, le slide accélère ; en montée, il meurt tout seul
+- [ ] Sous le tunnel bas (zone B) : impossible de se relever, aucun téléport, aucune perte brutale de vitesse
+- [ ] Sortie de slide sous plafond puis sortie du tunnel : la capsule se relève sans à-coup
+- [ ] Slide → Jump conserve la vitesse (comparer le HUD avant/après : écart ≤ 1 %)
+
+**Jump / Coyote / Buffer**
+- [ ] Sauter en quittant un bord (zone G) : le saut part, ça ne « mange » pas l'input
+- [ ] Appuyer sur saut juste avant de toucher le sol : le saut part à l'atterrissage
+- [ ] Aucun double saut possible
+
+**Bunny hop**
+- [ ] Enchaîner 5 hops : la vitesse monte visiblement puis se stabilise à `BHop_MaxChainGain`
+- [ ] Un hop raté est audible et se sent (perte via `SpeedRetention_Landing`)
+- [ ] La chaîne se reset après un atterrissage sans saut
+
+**Air strafe**
+- [ ] Sauter + strafe gauche + rotation souris gauche continue = la vitesse monte
+- [ ] Le même geste dans le mauvais sens ne donne rien (pas d'exploit accidentel)
+- [ ] Ça s'apprend en < 5 min mais reste dur à maîtriser
+
+**Dash**
+- [ ] Le dash part dans la direction du stick/clavier, pas de la caméra, quand il y a un input
+- [ ] Sans input, il part droit devant la caméra
+- [ ] Le dash ne ralentit jamais : vitesse de sortie ≥ vitesse d'entrée
+- [ ] Au sol, le dash est parfaitement horizontal
+- [ ] Le son « pas de charge » est distinct et immédiat
+
+**Wall Ride**
+- [ ] Accroche uniquement sur les murs `OD_WallRideSurface`, jamais sur les autres
+- [ ] Accroche impossible sous `WallRide_MinEntrySpeed`
+- [ ] L'alternance sur 2 murs opposés (zone E) est fluide et fait envie
+- [ ] Impossible de pomper indéfiniment un seul mur
+- [ ] Le tilt caméra aide à lire l'accroche sans donner la nausée
+
+**Collisions**
+- [ ] Percuter un pilier de face à haute vitesse fait mal (perte visible + shake) mais ne tue pas
+- [ ] Frôler un mur biseauté (zone J) ne coûte rien, on glisse
+- [ ] Après un gros hit, on peut immédiatement relancer sans être doublement puni
+
+**Global**
+- [ ] Le circuit K peut s'enchaîner sans jamais retomber sous `Speed_SprintCap`
+- [ ] 5 minutes en sandbox donnent envie de continuer — **si non, arrêter et retuner avant d'ajouter quoi que ce soit**
+
+---
+
+## 15. Pièges connus UE5
+
+| Piège | Symptôme | Correctif |
+|---|---|---|
+| `MaxWalkSpeed` re-clampe le momentum | La vitesse retombe instantanément à 1500 dès qu'on touche le sol | `MaxWalkSpeed = Max(CurrentSpeedCap, HorizontalSpeed)` **chaque frame** (§2.4 étape 6) |
+| `MaxAcceleration` clampe tout | L'air strafe ne donne rien, le dash paraît mou | Monter `MaxAcceleration` à `Accel_Air` en `Falling`. Ne jamais laisser la valeur par défaut (2048) |
+| `AirControl` par défaut | Contrôle aérien pâteux ou au contraire trop fort | Régler explicitement sur `AirStrafe_AirControl`. Si le strafe Quake fait tout le travail, descendre `AirControl` vers 0 |
+| `Launch Character` vs `Set Velocity` | `Launch Character` avec `bXYOverride = false` **additionne**, avec `true` **écrase** → gains incohérents | Utiliser **`Set Velocity`** partout dans ce système. `Launch Character` réservé au knockback subi |
+| Perte de vitesse à l'atterrissage | On perd 30–50 % en touchant le sol | `bMaintainHorizontalGroundVelocity = true`, `BrakingDecelerationWalking` bas (07_TUNING §2), et `SpeedRetention_Landing` appliqué **explicitement** dans `OnLanded`, jamais laissé au CMC |
+| Friction de sol invisible | Le bunny hop ne rend rien | `bUseSeparateBrakingFriction` + `GroundFriction = 0` pendant `BHop_PerfectWindow` (§6) |
+| Capsule qui accroche les arêtes | Blocage net sur un joint de modules à haute vitesse | `MaxStepHeight` généreux (07_TUNING §2), `bUseFlatBaseForFloorChecks = true`, éviter les meshes concaves, `Perch Radius Threshold` > 0 |
+| `SetCapsuleSize` sous un plafond | Téléport vertical, chute à travers le sol | `CanUncrouch()` obligatoire (§4.2). Ne jamais agrandir la capsule sans trace |
+| CMC écrase notre `Velocity` | Le code marche « une frame sur deux » | `AddTickPrerequisiteComponent(CachedCMC)` au `BeginPlay` du composant (§7.2) |
+| `MOVE_Flying` non réinitialisé | Le joueur reste en apesanteur après un wall ride | Restaurer `SetMovementMode(MOVE_Falling)` + `GravityScale` sur **toutes** les sorties, y compris mort et respawn |
+| `GravityScale` empilé | Dash pendant wall ride → gravité à 0 définitive | Un seul propriétaire : `BPC_MovementState` réécrit `GravityScale` chaque frame (§2.4 étape 6) ; les composants demandent un override, ils n'écrivent pas |
+| Tick order des composants | Le debug affiche des valeurs d'un frame de retard | Tout lire au même endroit (`BPC_MovementState`), les autres composants consomment via `Get` |
+| Vitesse > CCD | Traversée de mur au-dessus de ~5000 uu/s | `Speed_HardCap` respecté + `bUseCCD = true` sur la capsule joueur |
+| `Event Hit` non émis | Les collisions frontales ne sont jamais détectées | `Simulation Generates Hit Events = true` sur la capsule + `bNotifyRigidBodyCollision` |
+| Enhanced Input relu en Tick | Input fantôme après un pause/menu | `CachedMoveInput` remis à zéro sur `Completed`/`Canceled` **et** sur changement d'`IMC_` |
+
+---
+
+## 16. Divergences arbitrées
+
+`AirStrafe_WishSpeedCap` (§7), `WallRide_TraceInterval` (§9) et `SpeedLoss_Collision_MidAngle` (§10)
+**existent dans `07_TUNING`** — aucune clé de ce document n'est orpheline.
+Toutes les décisions qui touchent ce système sont consignées dans **`Docs/11_ARBITRAGES.md`**
+(D9 `PlayerSpeed01`, D11/D12 pénalité de vitesse, D15 toggle debug, D16 restart).

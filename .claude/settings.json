@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Read(//L:/Unreal Engine/Projects/OVERDRIVE/**)",
+      "Glob(//L:/Unreal Engine/Projects/OVERDRIVE/**)",
+      "Grep(//L:/Unreal Engine/Projects/OVERDRIVE/**)",
+      "Edit(//L:/Unreal Engine/Projects/OVERDRIVE/Docs/**)",
+      "Write(//L:/Unreal Engine/Projects/OVERDRIVE/Docs/**)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(wc:*)",
+      "mcp__unreal-mcp__list_toolsets",
+      "mcp__unreal-mcp__describe_toolset",
+      "mcp__blender__get_scene_info",
+      "mcp__blender__get_object_info",
+      "mcp__blender__get_viewport_screenshot"
+    ],
+    "ask": [
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Write(//L:/Unreal Engine/Projects/OVERDRIVE/Content/**)",
+      "Edit(//L:/Unreal Engine/Projects/OVERDRIVE/Config/**)"
+    ],
+    "deny": [
+      "Read(//L:/Unreal Engine/Projects/OVERDRIVE/Saved/**)",
+      "Read(//L:/Unreal Engine/Projects/OVERDRIVE/Intermediate/**)",
+      "Read(//L:/Unreal Engine/Projects/OVERDRIVE/DerivedDataCache/**)",
+      "Bash(git push --force:*)",
+      "Bash(rm -rf:*)"
+    ]
+  }
+}

@@ -1,0 +1,55 @@
+# ============================================================
+# OVERDRIVE — Unreal Engine 5.8 (Blueprint only)
+# ============================================================
+
+# --- Dossiers générés par UE ---
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vs/
+.vscode/
+.idea/
+
+# --- Fichiers projet générés ---
+*.sln
+*.suo
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+*.xcodeproj
+*.xcworkspace
+
+# --- Plugins : mêmes règles ---
+Plugins/**/Binaries/
+Plugins/**/Build/
+Plugins/**/Intermediate/
+
+# --- Config utilisateur (ne pas partager) ---
+Config/*User*.ini
+Saved/Config/
+
+# --- Blender : fichiers de sauvegarde auto ---
+Art_Source/*.blend1
+Art_Source/*.blend2
+Art_Source/*.blend[0-9]
+
+# --- Divers ---
+Thumbs.db
+desktop.ini
+.DS_Store
+*.tmp
+*.log
+
+# ============================================================
+# EXPLICITEMENT SUIVIS (ne pas ignorer)
+# ============================================================
+!Content/**
+!Config/Default*.ini
+!Docs/**
+!Art_Source/**
+!.claude/**
+!CLAUDE.md
+!.mcp.json
