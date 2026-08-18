@@ -43,12 +43,18 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       (`Gravity` = multiplicateur `×G`), pas des réglages projet
 - [x] **Ne pas toucher aux réglages de rendu** — Lumen et VSM restent actifs (`Docs/11_ARBITRAGES.md D2`)
 
-### J2 — Vitesse & sprint
-- [ ] `PDA_MovementData` + `DA_Movement_Default` (toutes les valeurs de `Docs/07_TUNING.md`)
+### J2 — Vitesse & sprint  *(commencé le 2026-08-18)*
+- [x] `PDA_MovementData` + `DA_Movement_Default` (toutes les valeurs de `Docs/07_TUNING.md`)
+      → 70 propriétés `Instance Editable`, miroir de `07_TUNING §2–§10`.
+      `MaxHealth` exclu volontairement : il appartient à `BPC_Health` (`05_ARCHITECTURE`)
 - [ ] `BPC_MovementState` : machine à états, vitesse interne, momentum, décroissance
 - [ ] Sprint
 - [ ] Overlay debug à l'écran : état, vitesse, cooldowns
 - [ ] **Test** : le sprint plafonne bien à `Speed_SprintCap`
+
+> **Prérequis enums** : `E_MovementState` et `E_HeatState` sont remplis et vérifiés.
+> Les 10 autres enums de `08_DATA_SCHEMAS §1` sont encore vides — ils ne bloquent rien
+> avant le J8, saisie manuelle par Louis (aucun outil ne sait le faire).
 
 ### J3 — Saut & air control
 - [ ] Jump + coyote time + jump buffer
