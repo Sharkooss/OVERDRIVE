@@ -16,8 +16,8 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 - [x] Structure de dossiers `Content/OVERDRIVE/`
 - [x] Documentation complète `Docs/`
 - [x] Règles agents `CLAUDE.md` + `.claude/`
-- [ ] Nettoyage du template (voir J1)
-- [ ] Dépôt git initialisé + premier commit
+- [x] Nettoyage du template (voir J1)
+- [x] Dépôt git initialisé + premier commit
 
 ---
 
@@ -26,16 +26,22 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 > **Objectif** : un graybox où on peut se déplacer 10 minutes sans s'ennuyer.
 > **Critère DONE** : le mouvement est déjà fun **sans aucun ennemi**.
 
-### J1 — Fondations
-- [ ] Supprimer `Content/FirstPerson`, `Content/Characters`, `Content/LevelPrototyping` (garder `Input/` et les matériaux de grid le temps du blockout)
-- [ ] Créer `GM_Overdrive`, `GS_Overdrive`, `PC_Overdrive`, `GI_Overdrive`, `PS_Overdrive`
-- [ ] Créer `BP_PlayerCharacter` (capsule, caméra, bras FP placeholder)
-- [ ] Configurer les canaux de collision et presets (`Docs/06_CONVENTIONS.md §7`)
-- [ ] Créer tous les Enums (`Docs/08_DATA_SCHEMAS.md §1`)
-- [ ] Créer `IMC_Gameplay` + toutes les `IA_*` (`Docs/09_INPUT.md`)
-- [ ] Créer `L_Sandbox_Movement` vide avec un sol de 20000 uu
-- [ ] Réglages projet : DefaultMap, GameMode, gravité, `MaxStepHeight`
-- [ ] **Ne pas toucher aux réglages de rendu** — Lumen et VSM restent actifs (`Docs/11_ARBITRAGES.md D2`)
+### J1 — Fondations ✅ (2026-08-18, cf. `Docs/Journal/2026-08-18_J1_Fondations.md`)
+- [x] Supprimer `Content/FirstPerson`, `Content/Characters`, `Content/LevelPrototyping` (garder `Input/` et les matériaux de grid le temps du blockout)
+      → `LevelPrototyping/Materials|Textures|Meshes` conservés, seul `Interactable/` supprimé (décision D1 du journal, **à valider**)
+- [x] Créer `GM_Overdrive`, `GS_Overdrive`, `PC_Overdrive`, `GI_Overdrive`, `PS_Overdrive`
+- [x] Créer `BP_PlayerCharacter` (capsule, caméra, bras FP placeholder)
+- [x] Configurer les canaux de collision et presets (`Docs/06_CONVENTIONS.md §7`)
+- [!] Créer tous les Enums (`Docs/08_DATA_SCHEMAS.md §1`)
+      → **13 assets créés mais VIDES.** Aucun outil (52 toolsets MCP + API Python UE)
+      ne sait écrire les entrées d'un `UserDefinedEnum`. **Saisie manuelle requise
+      avant le J2** — liste ordonnée dans `08_DATA_SCHEMAS §1`
+- [x] Créer `IMC_Gameplay` + toutes les `IA_*` (`Docs/09_INPUT.md`)
+- [x] Créer `L_Sandbox_Movement` vide avec un sol de 20000 uu
+- [x] Réglages projet : DefaultMap, GameMode, gravité, `MaxStepHeight`
+      → `Gravity` et `MaxStepHeight` sont des réglages du **CMC** de `BP_PlayerCharacter`
+      (`Gravity` = multiplicateur `×G`), pas des réglages projet
+- [x] **Ne pas toucher aux réglages de rendu** — Lumen et VSM restent actifs (`Docs/11_ARBITRAGES.md D2`)
 
 ### J2 — Vitesse & sprint
 - [ ] `PDA_MovementData` + `DA_Movement_Default` (toutes les valeurs de `Docs/07_TUNING.md`)

@@ -67,6 +67,22 @@ On ne se contente jamais de `Set Input Mode`.
 ### `IA_Slide`
 - Trigger `Hold`. Relâcher termine le slide même si `Slide_MaxDuration` n'est pas écoulée.
 
+> ### ⚠️ « Hold » du tableau ≠ trigger `InputTriggerHold` — décidé au J1
+>
+> Le mot « Hold » de la colonne *Trigger* du §1 recouvre **deux choses différentes** dans
+> Enhanced Input, et les confondre casse le sprint et le slide :
+>
+> | Sens voulu | Implémentation réelle | Actions concernées |
+> |---|---|---|
+> | « **tant que** la touche est tenue » | **aucun trigger explicite** (sémantique `Down` : `Triggered` à chaque frame tant que c'est tenu, `Completed` au relâchement) | `IA_Sprint`, `IA_Slide` |
+> | « il faut tenir **N secondes** avant que ça parte » | **`InputTriggerHold`** avec `HoldTimeThreshold` | `IA_Restart` (0.4 s) |
+>
+> Mettre un `InputTriggerHold` sur `IA_Sprint` imposerait un délai d'une seconde avant que
+> le sprint démarre — exactement ce que le pilier « fun à contrôler » interdit.
+>
+> `IA_Jump` n'a lui non plus **aucun trigger** : il a besoin de `Started` **et** `Completed`
+> (le « Pressed + Released » du §1), ce qu'un trigger `Pressed` seul ne fournit pas.
+
 ### `IA_Restart`
 - Trigger `Hold` **0.4 s** pour éviter les restarts accidentels en plein run (`11_ARBITRAGES D16`).
 - Cible technique : **< 0.5 s** entre la mort et le retour en jouable (cf. `Restart_FadeDuration`, `Docs/07_TUNING.md §16`).
