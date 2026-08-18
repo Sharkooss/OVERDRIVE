@@ -56,27 +56,30 @@
 | **D2** — `GM_Overdrive` hérite de **`GameModeBase`**, pas de `GameMode`. `05_ARCHITECTURE §39` dit juste « GameMode ». OVERDRIVE est solo, sans match state : `GameModeBase` est plus léger et suffit. | — |
 | **D3** — « Hold » dans `09_INPUT §1` recouvrait deux mécaniques différentes d'Enhanced Input. Tranché : `IA_Sprint` / `IA_Slide` = **aucun trigger** (sémantique `Down`, agit tant que la touche est tenue) ; seul `IA_Restart` utilise un vrai `InputTriggerHold` (0,4 s). Un `InputTriggerHold` sur le sprint imposerait 1 s de délai avant de démarrer. | **`Docs/09_INPUT.md §3`** ✅ |
 | **D4** — Nommage des composants du `BP_PlayerCharacter` : `FirstPersonCamera` et `ArmsMesh`. Aucune convention n'existait pour les composants. | — |
-| **D5** — Une passerelle Python éditeur (`Content/Python/init_unreal.py`) est ajoutée comme outillage. Voir « Outillage » plus bas. | à valider par Louis |
+| **D5** — ~~Passerelle Python éditeur ajoutée~~ → **refusée par Louis, supprimée.** Remplacée par `bAutoStartServer = true` dans les réglages du plugin ModelContextProtocol. Voir « Outillage ». | — |
+| **D6** — Les entrées des 13 enums sont saisies **à la main par Louis**. Après vérification des 52 toolsets MCP, de l'API Python d'UE et de l'arbre d'accessibilité Slate, aucune voie automatisée n'existe. | `04_ROADMAP.md` J1 ✅ |
 
 ## Valeurs modifiées
 
 Aucune. Toutes les valeurs posées viennent telles quelles de `07_TUNING §2`.
 
-## Outillage ajouté (à valider)
+## Outillage
 
-Deux outils, **aucun n'est du code de jeu** — ni l'un ni l'autre ne part au cook :
+**`Saved/mcp.py`** — client HTTP direct vers le serveur MCP de l'éditeur
+(`127.0.0.1:8000/mcp`). `Saved/` est gitignoré, ce n'est pas un asset du projet.
+Écrit parce que la connexion MCP native de Claude Code est tombée avec l'éditeur
+figé et n'est jamais revenue dans la session.
 
-1. **`Saved/mcp.py`** — client HTTP direct vers le serveur MCP de l'éditeur
-   (`127.0.0.1:8000/mcp`). `Saved/` est gitignoré. Écrit parce que la connexion MCP
-   native de Claude Code est tombée avec l'éditeur et n'est pas revenue.
-2. **`Content/Python/init_unreal.py`** — passerelle d'exécution Python. UE exécute ce
-   fichier au démarrage de l'éditeur ; il enregistre un callback post-tick qui exécute
-   tout `.py` déposé dans `Saved/py_inbox/` et écrit la sortie dans `Saved/py_outbox/`.
-   **C'est ce qui a permis de relancer le serveur MCP** (`ModelContextProtocol.StartServer`)
-   quand son listener HTTP n'a pas démarré tout seul.
-   ⚠️ Il exécute automatiquement ce qu'on dépose dans ce dossier. `Saved/` est gitignoré,
-   donc rien ne circule, mais **si tu n'en veux pas, supprime le fichier** : plus rien
-   ne dépend de lui.
+**Passerelle Python — créée puis SUPPRIMÉE le jour même (décision de Louis).**
+`Content/Python/init_unreal.py` exécutait tout `.py` déposé dans `Saved/py_inbox/`.
+Elle servait à une seule chose en pratique : relancer le serveur MCP quand son
+listener HTTP ne démarrait pas au lancement de l'éditeur (arrivé 2 fois sur 3).
+Elle a aussi gelé l'éditeur une fois (bug de ré-entrance, cf. « Bugs »).
+
+**Remplacée par le vrai réglage** : `Editor > General > ModelContextProtocolSettings`
+→ **`bAutoStartServer` passé de `false` à `true`**. Le listener démarre désormais
+tout seul, sans script. C'est la bonne solution : celle qu'il fallait chercher en
+premier au lieu d'écrire un contournement.
 
 ## Bugs rencontrés
 
