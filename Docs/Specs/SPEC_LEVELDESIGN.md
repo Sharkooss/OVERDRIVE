@@ -225,13 +225,20 @@ une fois colore les 40 props d'un coup, et un prop se recolore sans réexport.
 
 #### Écarts à trancher
 
+> **Correction du 2026-08-19.** Une première version de ce tableau accusait le kit de porter du
+> « rouge décoratif » sur ~15 props. **C'était faux, et c'était de ma faute** : je n'avais pas lu
+> `Docs/Journal/2026-08-18_EnvKit_RooftopCity.md §1`, qui définit explicitement le rouge du kit comme
+> *« je peux atterrir / courir dessus »* — arête **haute** de tout prop praticable. Une clim de 300 uu
+> se saute et se parcourt : son arête rouge **enseigne** quelque chose. La règle §10.1 est respectée.
+> L'entrée A ci-dessous est réécrite en conséquence.
+
 | # | Écart | Conséquence |
 |---|---|---|
-| A | **26 props sur 40 portent un slot `M_OD_Red_Traversal`**, dont ~15 purement décoratifs (AC, caisses, cuve, cheminée, groupe électrogène…) | Viole §10.1 règle 2 et `SPEC_ART_DIRECTION §10.3` : *une arête rouge est praticable, sans exception*. **Se corrige à l'assignation de matériau, pas au modèle** — coût quasi nul |
-| B | **Axe de longueur sur `+Y`** pour tous les props linéaires (`Air_Duct`, `Water_Pipe`, `Roof_Edge`, `Safety_Rail`, `Pipe_Section`) et **canon du pistolet sur `+Y`** | §3 impose la longueur sur `+X`. Interne au kit c'est cohérent ; mixé avec les futurs `SM_Module_*` c'est une source d'erreur de rotation. **Soit** on réexporte, **soit** on écrit ici que le kit de props est orienté `+Y` |
-| C | `SM_Roof_Edge` et `SM_Safety_Rail` font **200 uu de haut** | `SM_Module_Edge_800` est plafonné à **50 uu = `MaxStepHeight`** précisément pour ne jamais bloquer. À 200 uu ces deux props **arrêtent le joueur** — à réserver aux bords non franchissables |
-| D | `lightMapCoordinateIndex = 1` sur les 41 | Un canal UV de lightmap a été généré à l'import alors que le Static Lighting est désactivé. Mémoire gaspillée, sans effet visuel. Cosmétique |
-| E | `SM_Neon_Pillar` | Nom hérité de la DA v1 nocturne, comme l'ex-`SM_Module_NeonStrip_400`. À renommer si la pièce sert de bande de traversée |
+| A | **Intensité émissive du rouge, pas son emplacement.** 26 props sur 40 portent un slot `M_OD_Red_Traversal`. À `EmissiveIntensity = 8.0` (valeur « surface de traversée », `PALETTE §8`) sur chaque caisse et chaque clim, le plafond *« max 3 couleurs saturées visibles simultanément »* (§10.1 règle 5) saute dans une scène dense | **Déjà identifié par le journal du kit §6, non tranché.** Se règle par `MI_`, pas au modèle : prévoir sans doute deux instances — `MI_Red_Traversal_Wall` à 8.0 pour les vraies surfaces de wall ride, `MI_Red_Traversal_Edge` plus bas pour les arêtes de props. **À tester en jeu** |
+| B | **La doc et le moteur se contredisent sur l'orientation.** Le journal du kit §3 affirme *« longueur sur +X UE »*. **Mesuré à l'import : X et Y sont échangés** sur tout le kit — `SM_Billboard_Large` est annoncé `100 × 2400 × 800` et arrive `2400 × 100 × 800` ; `SM_Roof_Edge` annoncé `800 × 100 × 200` arrive `100 × 800 × 200` ; idem pour les 40. Le canon du pistolet pointe `+Y` (bornes Y = −8 → +22) | **Le moteur a raison, la doc a tort** — c'est une mesure, pas une lecture. Soit on réexporte avec le bon mapping d'axes, soit on acte ici que le kit est orienté `+Y` et on aligne les futurs `SM_Module_*` dessus. **Ne pas mélanger les deux conventions** : c'est une source garantie de rotations fausses au blockout |
+| C | `SM_Roof_Edge` et `SM_Safety_Rail` font **200 uu de haut** | `SM_Module_Edge_800` est plafonné à **50 uu = `MaxStepHeight`** précisément pour ne jamais bloquer. À 200 uu ces deux props **arrêtent le joueur** — parfait comme parapet infranchissable, inutilisable comme bordure de lisibilité. Le module `Edge_800` reste donc à produire |
+| D | `lightMapCoordinateIndex = 1` sur les 41 | Le journal du kit §5 demandait `Generate Lightmap UVs ✘`, mais `StaticMeshTools.import_file` **n'expose pas** cette option (`12_PIEGES §5.11`) : un canal UV de lightmap a été généré alors que le Static Lighting est désactivé. Mémoire gaspillée, aucun effet visuel. Cosmétique |
+| E | **Destination des 8 bâtiments et toits.** Le journal du kit §5 les envoie dans `Modules/` ; ils sont dans `Props/` | Choix de l'agent, motivé par le verrouillage de `Modules/` aux 23 `SM_Module_*`. **À trancher par Louis** — un `AssetTools.move` suffit dans les deux sens |
 
 ---
 
