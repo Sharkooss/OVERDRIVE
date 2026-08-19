@@ -131,19 +131,31 @@ que par slide-boost, dash, wall ride et bunny hop, et **décroît** si le joueur
 | `AirStrafe_GainAngleMax` | 60 | ° | À CALIBRER | angle max input/vélocité donnant du gain |
 | `AirStrafe_SpeedGainPerSec` | 1200 | uu/s² | À CALIBRER | clamp #2, **c'est lui qui borne le gain en pratique** |
 | `AirStrafe_NoGainAboveSpeed` | 5000 | uu/s | À CALIBRER | plafond du gain aérien |
-| `AirStrafe_WishSpeedCap` | 150 | uu/s | À CALIBRER | **clé du modèle Quake** : plafond de la vitesse désirée projetée. Bas = fenêtre de gain étroite, exige un strafe précis ; haut = gain facile |
+| `AirStrafe_WishSpeedCap` | 1500 | uu/s | **VALIDÉ 2026-08-19** | **la clé du modèle.** Doit valoir `Speed_SprintCap` → modèle **Quake 3** : le strafe fonctionne en diagonale (`Z+Q` / `Z+D` + souris). Une valeur basse donne le modèle Quake 1/CPMA, où il faut lâcher `Z` |
 
 **Modèle retenu** : accélération vectorielle style Quake/Source (projection de la vélocité sur
 la direction d'input, gain si l'angle est dans `GainAngleMax`). C'est ce qui rend le bunny hop
 et le strafe *apprenables* plutôt qu'aléatoires.
 
-> **Échelle des valeurs (J3).** Les constantes de Quake ne sont **pas** transposables telles quelles :
-> Quake court à `320 u/s` avec `wishspeed = 30` et `sv_airaccelerate = 10` (soit `300 u/s²` d'accélération
-> aérienne effective). OVERDRIVE sprinte à `1500 uu/s`, soit un facteur **≈ 4.7**.
-> Les valeurs initiales (`WishSpeedCap = 60`, `SpeedGainPerSec = 300`) étaient à l'échelle de Quake,
-> pas à la nôtre : la fenêtre de gain était ~2,5× trop étroite et le gain ~4× trop lent.
-> D'où `30 × 4.7 ≈ 150` et `300 × 4.7 ≈ 1400` (arrondi prudent à 1200).
-> **Toute modification de `Speed_SprintCap` doit rééchelonner ces deux clés dans le même rapport.**
+> **Quel modèle d'air strafe ? (tranché au J3, validé en playtest)**
+> Il en existe deux, et ils **ne se jouent pas pareil** :
+>
+> | Modèle | `WishSpeedCap` | Comment on strafe |
+> |---|---|---|
+> | Quake 1 / CPMA | ~30 (bridé, bas) | touche latérale **seule** — il faut lâcher `Z` |
+> | **Quake 3 ← retenu** | = vitesse de course | **`Z+Q` / `Z+D` + souris**, la diagonale naturelle |
+>
+> La garde du gain est `AddSpeed = WishSpeedCap − Dot(vitesse, direction_input)`. En diagonale
+> l'input est à 45° de la vitesse, donc à 1500 uu/s la projection vaut `1500 × cos(45°) ≈ 1060` :
+> avec un `WishSpeedCap` bas, `AddSpeed` est négatif et **aucun gain n'est possible**.
+> C'est le modèle Quake 3 qu'attend un joueur de FPS arcade — validé manche en main.
+>
+> **Plafond atteignable = `WishSpeedCap / cos(angle)`** : 2121 uu/s en diagonale à 45°,
+> davantage à mesure qu'on élargit l'angle à la souris. C'est là qu'est le skill.
+>
+> **`AirStrafe_WishSpeedCap` suit `Speed_SprintCap`.** Si le sprint cap bouge, cette clé bouge avec.
+> Idem pour `_SpeedGainPerSec`, calé sur `sv_airaccelerate × wishspeed` de Quake rééchelonné
+> (`300 u/s² × 1500/320 ≈ 1400`, arrondi prudent à 1200).
 
 ---
 
@@ -551,7 +563,8 @@ Cf. `Docs/11_ARBITRAGES.md D1` pour la règle complète de portée des données.
 | 2026-08-18 | *(section §18)* | — | `Run_MaxLives = 3` | Arbitrage de Louis : ajout d'une condition de défaite | À CALIBRER |
 | 2026-08-18 | `Speed_IdleThreshold` (§3) | — | `50` uu/s | J2 : la résolution d'état a besoin d'un seuil `Idle`, absent de la doc | À CALIBRER |
 | 2026-08-18 | `Input_MoveDeadZone` (§3) | — | `0.05` | J2 : `SPEC_MOVEMENT §7/§8` utilisait `0.05` en dur, la clé n'existait nulle part | À CALIBRER |
-| 2026-08-19 | `AirStrafe_WishSpeedCap` (§7) | `60` | `150` | **Playtest J3 de Louis** : « ça demande de trop bouger la souris ». Valeur de Quake non rééchelonnée — fenêtre de gain 2,5× trop étroite pour notre vitesse | À CALIBRER |
+| 2026-08-19 | `AirStrafe_WishSpeedCap` (§7) | `60` | `150` | **Playtest J3 de Louis** : « ça demande de trop bouger la souris ». Valeur de Quake non rééchelonnée — fenêtre de gain 2,5× trop étroite pour notre vitesse | *(remplacé, cf. ligne suivante)* |
+| 2026-08-19 | `AirStrafe_WishSpeedCap` (§7) | `150` | **`1500`** | **Playtest J3 n°3** : « en Z+Q avec la caméra dans le bon côté, ça ne compte pas comme un strafe ». Mauvais **modèle** : Quake 1/CPMA (touche latérale seule) au lieu de Quake 3 (diagonale + souris). `WishSpeedCap = Speed_SprintCap` | **VALIDÉ** |
 | 2026-08-19 | `AirStrafe_SpeedGainPerSec` (§7) | `300` | `1200` | Idem : c'est le clamp qui bornait le gain, à l'échelle de Quake (320 u/s) et non de la nôtre (1500 uu/s) | À CALIBRER |
 | 2026-08-19 | `AirStrafe_MaxAccel` (§7) | `2500` | `4000` | Doit rester au-dessus de `SpeedGainPerSec`, sinon il redevient le clamp actif | À CALIBRER |
 | 2026-08-19 | `AirStrafe_GainAngleMax` (§7) | `45` | `60` | Élargit la fenêtre angulaire de gain : seuil `cos(150°) = −0.866` au lieu de `cos(135°) = −0.707` | À CALIBRER |

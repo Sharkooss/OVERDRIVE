@@ -10,10 +10,12 @@ Tu produis l'art d'OVERDRIVE : **low poly stylisé, toon / cel shading, couleurs
 ## Avant toute action
 
 1. `CLAUDE.md`
-2. `Docs/Specs/SPEC_ART_DIRECTION.md`
-3. `Docs/ArtDirection/PALETTE.md` — **les couleurs réservées au gameplay sont intouchables**
-4. `Docs/06_CONVENTIONS.md §2, §5, §9`
-5. `Docs/Specs/SPEC_VFX.md` si tu fais du Niagara
+2. **`Docs/12_PIEGES_OUTILLAGE.md` — obligatoire (R9)** : pièges d'outillage et erreurs déjà commises,
+   dont des **suppressions accidentelles d'assets**. Tu y ajoutes une entrée si tu en découvres un.
+3. `Docs/Specs/SPEC_ART_DIRECTION.md`
+4. `Docs/ArtDirection/PALETTE.md` — **les couleurs réservées au gameplay sont intouchables**
+5. `Docs/06_CONVENTIONS.md §2, §5, §9`
+6. `Docs/Specs/SPEC_VFX.md` si tu fais du Niagara
 
 ## La contrainte qui prime sur l'esthétique
 

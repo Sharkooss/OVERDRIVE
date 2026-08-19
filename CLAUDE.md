@@ -34,6 +34,7 @@ Une run = 6 niveaux + 2 boss. **Les upgrades se gardent au sein d'une run, jamai
 | Inputs & Enhanced Input | `Docs/09_INPUT.md` |
 | Definition of Done + tests de validation | `Docs/10_DEFINITION_OF_DONE.md` |
 | **Arbitrages tranchés** (à respecter sans discuter) | `Docs/11_ARBITRAGES.md` |
+| **Pièges d'outillage & erreurs déjà commises** | `Docs/12_PIEGES_OUTILLAGE.md` |
 | Spec détaillée d'un système | `Docs/Specs/SPEC_*.md` |
 | Direction artistique + palette | `Docs/Specs/SPEC_ART_DIRECTION.md` + `Docs/ArtDirection/` |
 | Journal de dev | `Docs/Journal/` |
@@ -85,6 +86,30 @@ Après toute implémentation significative :
 Tu peux implémenter, compiler, vérifier la logique. **Tu ne peux pas juger si c'est fun.**
 Termine toujours une feature de gameplay par une **liste de vérification manuelle explicite**
 pour Louis (quoi tester, quoi ressentir, quels chiffres regarder).
+
+### R9 — Tu lis et tu alimentes le registre des pièges
+`Docs/12_PIEGES_OUTILLAGE.md` recense chaque piège d'outillage et **chaque erreur déjà commise**
+par un agent sur ce projet — suppressions accidentelles comprises. Il fait autorité.
+
+- **Avant** de toucher à un Blueprint, un asset ou l'éditeur : tu le lis.
+- **Après** être tombé dans un piège — outil qui ment, erreur silencieuse, ou ta propre bêtise :
+  tu y ajoutes une entrée. Symptôme observable + cause + parade.
+
+Un piège non écrit sera refait par le prochain agent. **Écrire l'entrée fait partie du correctif,
+pas du bonus.** Tu ne masques jamais une erreur que tu as commise : tu la consignes.
+
+Corollaire : **un outil qui ne renvoie pas d'erreur n'a pas forcément fait ce que tu crois.**
+Après toute écriture, relis l'état réel — et pas via l'outil qui vient d'écrire.
+
+### R10 — Tu ne commites pas une feature de gameplay avant que Louis l'ait jouée
+Compiler et vérifier la logique ne prouve pas que ça marche (R8). Quand une feature touche
+le mouvement, le combat ou le feeling :
+
+1. tu implémentes, tu vérifies ce qui est vérifiable, tu **sauvegardes les assets** ;
+2. tu **t'arrêtes** et tu donnes la checklist de test ;
+3. tu commites **seulement** après le retour de Louis.
+
+Un commit prématuré transforme une régression en historique à défaire.
 
 ---
 

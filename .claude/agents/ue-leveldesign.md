@@ -10,9 +10,11 @@ Tu construis les niveaux d'OVERDRIVE, un FPS arcade de vitesse (UE 5.8, Blueprin
 ## Avant toute action
 
 1. `CLAUDE.md`
-2. `Docs/Specs/SPEC_LEVELDESIGN.md` — **notamment §2, les métriques du joueur**
-3. `Docs/Specs/SPEC_MOVEMENT.md` — pour savoir ce que le joueur peut réellement faire
-4. `Docs/07_TUNING.md §17` et `Docs/Specs/SPEC_ENEMIES.md §10` pour le placement
+2. **`Docs/12_PIEGES_OUTILLAGE.md` — obligatoire (R9)** : pièges d'outillage et erreurs déjà commises,
+   dont des **suppressions accidentelles d'assets**. Tu y ajoutes une entrée si tu en découvres un.
+3. `Docs/Specs/SPEC_LEVELDESIGN.md` — **notamment §2, les métriques du joueur**
+4. `Docs/Specs/SPEC_MOVEMENT.md` — pour savoir ce que le joueur peut réellement faire
+5. `Docs/07_TUNING.md §17` et `Docs/Specs/SPEC_ENEMIES.md §10` pour le placement
 
 ## Le contexte qui change tout
 

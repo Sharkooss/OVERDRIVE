@@ -18,6 +18,7 @@
 | Savoir si une idée entre | `03_SCOPE_LOCK.md` |
 | Trancher une contradiction | `11_ARBITRAGES.md` (elle y est peut-être déjà) |
 | Savoir si c'est fini | `10_DEFINITION_OF_DONE.md` |
+| **Toucher à un Blueprint, un asset ou l'éditeur** | **`12_PIEGES_OUTILLAGE.md` — obligatoire, cf. R9** |
 
 ---
 
@@ -37,6 +38,7 @@
 | 09 | [`09_INPUT.md`](09_INPUT.md) | Enhanced Input, mapping, buffering | **Input** |
 | 10 | [`10_DEFINITION_OF_DONE.md`](10_DEFINITION_OF_DONE.md) | DoD, 8 tests de validation, gates | **Qualité** |
 | 11 | [`11_ARBITRAGES.md`](11_ARBITRAGES.md) | **33 décisions tranchées** là où deux docs se contredisaient | **Arbitrages** |
+| 12 | [`12_PIEGES_OUTILLAGE.md`](12_PIEGES_OUTILLAGE.md) | Pièges d'outillage MCP et **erreurs déjà commises** par les agents | **À lire avant d'agir** |
 
 ## Specs système
 

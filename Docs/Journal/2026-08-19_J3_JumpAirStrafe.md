@@ -252,6 +252,74 @@ Les 6 valeurs sont bien relues par `CacheTuning` au `BeginPlay`
 
 ---
 
+## Playtest de Louis n°3 — le bon modèle d'air strafe ✅ VALIDÉ
+
+> « en Z+Q ou Z+D avec la caméra tournée du bon côté, ça ne compte pas comme un strafe »
+
+**Ce n'était pas du tuning : c'était le mauvais modèle.**
+
+La garde du gain est `AddSpeed = WishSpeedCap − Dot(vitesse, direction_input)`. En Z+Q l'input est
+à 45° de la vitesse ; à 1500 uu/s la projection vaut `1500 × cos(45°) ≈ 1060`. Avec
+`WishSpeedCap = 150` : `150 − 1060 = −910` → négatif → **refusé**. Il fallait un input quasi
+perpendiculaire, donc lâcher `Z`.
+
+J'avais implémenté **Quake 1 / CPMA** (`wishspeed` bridé ~30, strafe à la touche latérale seule).
+Louis décrivait **Quake 3** (`wishspeed` = vitesse de course, strafe en diagonale + souris) —
+c'est celui qu'attend un joueur de FPS arcade.
+
+**`AirStrafe_WishSpeedCap` : 150 → 1500** (= `Speed_SprintCap`).
+
+Plafond atteignable = `WishSpeedCap / cos(angle)` : **2121 uu/s** en diagonale à 45°, davantage à
+mesure qu'on élargit l'angle à la souris. La diagonale amorce le gain, la souris le prolonge —
+c'est là qu'est le skill. Cette clé est désormais **solidaire de `Speed_SprintCap`**.
+
+### Le buffer de bunny hop existait — et était détruit à chaque atterrissage
+
+Louis a demandé « un petit buffer pour pouvoir input à peine avant de toucher le sol ».
+`Jump_BufferTime = 0.15 s` **était déjà implémenté** — mais inopérant.
+
+`HandleLanded` déclenchait `DoJump` **pendant `Event OnLanded`**. Or juste après `Landed()`, le CMC
+appelle `SetPostLandedPhysics` → `SetMovementMode(Walking)` → **`Velocity.Z = 0`**. Le saut
+bufferisé était systématiquement écrasé, une frame après avoir été déclenché.
+
+Correctif : nouvelle fonction **`ConsumeBufferedJump()`**, appelée dans le Tick **après
+`ResolveState`**. À ce moment le CMC a terminé son cycle, notre `SetMovementMode(Falling)` tient.
+`HandleLanded` ne fait plus que de la comptabilité (retention, grace, reset de `bJumpConsumed`).
+
+Placée après `ResolveState` et non avant, pour que l'état résolu de la frame soit `Walking` — la
+transition `Walking → Jumping` est autorisée par la table `§1.3`, alors qu'un `Idle → Jumping`
+depuis un état non encore résolu aurait fait clignoter la machine à états.
+
+> ⚠️ **Ce que je n'ai pas pu vérifier** : le déclenchement réel du buffer. Un aller-retour MCP fait
+> avancer ~20 s de temps de jeu alors que la phase aérienne dure 0,77 s — impossible de viser la
+> fenêtre descendante, et un `sleep` dans le script gèle le game thread. Structure et condition
+> vérifiées, timing non. Consigné en `12_PIEGES_OUTILLAGE §4.4`.
+
+### Verdict de Louis
+
+> « ok parfait […] le straf me paraît correct »
+
+**Le J3 est validé manche en main.** `AirStrafe_WishSpeedCap` passe en `VALIDÉ` dans `07_TUNING §19` —
+c'est la **première valeur validée du projet**.
+
+---
+
+## Ce que ce J3 laisse derrière lui
+
+Trois régressions en une journée, toutes de la même famille : **un outil qui échoue en silence, et
+moi qui conclus trop vite.** Le correctif durable n'est pas dans le Blueprint, il est dans le process :
+
+- **`Docs/12_PIEGES_OUTILLAGE.md`** créé — 30 pièges recensés, avec pour chacun le symptôme
+  observable, la cause et la parade. Y compris **mes propres destructions accidentelles**.
+- **R9** ajoutée à `CLAUDE.md` : lire le registre avant d'agir, l'alimenter après chaque piège.
+  Écrire l'entrée fait partie du correctif, pas du bonus.
+- **R10** ajoutée : **ne jamais committer une feature de gameplay avant que Louis l'ait jouée.**
+  Sauvegarder, s'arrêter, donner la checklist, attendre.
+- Les trois sous-agents (`ue-gameplay`, `ue-art`, `ue-leveldesign`) pointent sur le registre en
+  étape 2 de leur préambule.
+
+---
+
 ## ⚙️ Checklist de test manuel (R8) — Louis
 
 `L_Sandbox_Movement` en PIE. **`F3`** bascule l'overlay. La ligne à surveiller est **`JUMP`**.

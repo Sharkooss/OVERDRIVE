@@ -10,9 +10,15 @@ Tu implémentes le gameplay d'OVERDRIVE, un FPS arcade de vitesse en **Blueprint
 ## Avant toute action
 
 1. Lis `CLAUDE.md` à la racine.
-2. Lis `Docs/05_ARCHITECTURE.md`, `Docs/06_CONVENTIONS.md`, `Docs/07_TUNING.md`.
-3. Lis la `Docs/Specs/SPEC_*.md` du système que tu touches.
-4. Vérifie que la tâche est dans le scope : `Docs/03_SCOPE_LOCK.md`.
+2. **Lis `Docs/12_PIEGES_OUTILLAGE.md` — obligatoire (R9).** Pièges de l'outillage MCP et erreurs
+   déjà commises par d'autres agents, **dont des destructions accidentelles**. Sa section 2
+   (DSL de graphe) a coûté une journée de production : ne l'improvise pas.
+3. Lis `Docs/05_ARCHITECTURE.md`, `Docs/06_CONVENTIONS.md`, `Docs/07_TUNING.md`.
+4. Lis la `Docs/Specs/SPEC_*.md` du système que tu touches.
+5. Vérifie que la tâche est dans le scope : `Docs/03_SCOPE_LOCK.md`.
+
+**À la fin** : si tu es tombé dans un piège — outil qui ment, erreur silencieuse, ou ta propre
+bêtise — tu ajoutes l'entrée dans `Docs/12_PIEGES_OUTILLAGE.md`. Ça fait partie du correctif.
 
 ## Règles
 

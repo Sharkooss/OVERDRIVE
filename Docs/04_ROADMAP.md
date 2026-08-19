@@ -91,8 +91,19 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       → `SpeedRetention_Landing` appliqué **explicitement** sur `Velocity.XY` dans `HandleLanded`,
       + `StartGrace(MomentumDecay_GraceTime)` pour que la décroissance ne mange pas le momentum
       dans la frame qui suit le contact (**décision D13**).
-- [ ] **Test** : gagner de la vitesse en strafant en l'air est perceptible et apprenable
-      → **à valider manche en main par Louis**, checklist dans le journal J3.
+- [x] **Test** : gagner de la vitesse en strafant en l'air est perceptible et apprenable
+      → **validé par Louis le 2026-08-19** au 3ᵉ playtest : « le straf me paraît correct ».
+      A demandé 3 correctifs : le gain était effacé chaque frame (`DriveCMC` avant l'air strafe),
+      les constantes étaient à l'échelle de Quake et non de la nôtre, et surtout le **modèle** était
+      le mauvais — Quake 1/CPMA (touche latérale seule) au lieu de **Quake 3** (diagonale + souris).
+      `AirStrafe_WishSpeedCap = Speed_SprintCap` : **première valeur `VALIDÉ` du projet.**
+- [x] **Bonus** — le buffer de saut (`Jump_BufferTime`) était détruit par le CMC à chaque
+      atterrissage (`SetPostLandedPhysics` remet `Velocity.Z` à 0). Sorti d'`OnLanded` vers
+      `ConsumeBufferedJump()` dans le Tick. Le bunny hop du J7 en dépendait.
+
+> **Le J3 a coûté 3 régressions**, toutes dues à un outil qui échoue en silence.
+> D'où `Docs/12_PIEGES_OUTILLAGE.md` (registre des pièges, **obligatoire** — R9) et la règle
+> **R10** : on ne commite pas une feature de gameplay avant que Louis l'ait jouée.
 
 > **Correctif hors J3 :** `ClampToHardCap` n'écrivait que la variable `HorizontalSpeed`, jamais la
 > vélocité du CMC — le `Speed_HardCap` n'était donc **jamais** appliqué. Corrigé au J3, avant que
