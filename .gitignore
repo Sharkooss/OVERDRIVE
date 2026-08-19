@@ -53,3 +53,6 @@ desktop.ini
 !.claude/**
 !CLAUDE.md
 !.mcp.json
+
+# Worktrees temporaires des tâches Claude Code
+.claude/worktrees/

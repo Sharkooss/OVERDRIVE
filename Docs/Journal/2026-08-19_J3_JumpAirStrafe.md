@@ -107,24 +107,88 @@ valeurs de template contradictoires) :
 
 ---
 
-## Vérification (2026-08-19)
+## ⛔ Régression introduite puis corrigée le même jour — à lire
 
-Statique, en éditeur :
+**Le premier commit du J3 (`f8b7b0b`) cassait tout le jeu.** Louis l'a constaté immédiatement :
+plus d'overlay `F3`, plus de sprint, pas de saut. Chronologie et leçons.
+
+### Le bug
+
+`EventBeginPlay` appelait **`SetComponentTickEnabled(false)`**. J'avais écrit la ligne en positionnel :
+
+```
+(Components|Tick|SetComponentTickEnabled true)
+```
+
+L'argument positionnel part sur le pin **`self`** (piège connu, documenté dans mes propres notes).
+Le booléen a été silencieusement jeté et le pin `bEnabled` est resté à son défaut `false`.
+**Le Tick de `BPC_MovementState` était donc désactivé dès le `BeginPlay`.**
+
+Tout en découle par une seule cause : pas de Tick → pas de `DrawDebugOverlay` (F3 bascule un booléen
+que plus personne ne lit), pas de rampe de sprint, et surtout `bIsGrounded` jamais mis à jour →
+`TryJump` échoue systématiquement sa garde.
+
+La ligne d'à côté avait le même défaut : `AddTickPrerequisiteComponent` avait le CMC sur `self` et
+son pin `PrerequisiteComponent` **vide** — le correctif du piège n°1 de `§15` était mort lui aussi.
+
+### Pourquoi la vérification ne l'a pas vu
+
+Elle **l'avait vu**. Le relevé PIE affichait `bIsGrounded = false` et `MaxAcceleration = 2048`
+(le défaut moteur, pas nos 4000) : le Tick ne tournait pas. J'ai attribué ça à
+« l'éditeur n'a pas le focus » et j'ai commité.
+
+La donnée qui tranchait était disponible et je ne l'ai pas cherchée : `CMC.MovementMode` valait
+**`MOVE_Walking`**, donc le personnage avait atterri, donc **le monde ticke**. Seul notre composant
+était mort. Une hypothèse d'environnement invoquée sans la tester coûte plus cher que pas de
+vérification du tout : elle donne une fausse assurance.
+
+### Deuxième erreur : `write_graph_dsl` empile, il n'écrase pas
+
+En cherchant la cause j'ai découvert que l'`EventGraph` contenait **101 nœuds** : 5 copies de la
+chaîne de Tick, dont 4 orphelines datant du **J2**. `write_graph_dsl` **ajoute** les nœuds sans
+supprimer les anciens, et `read_graph_dsl` ne montre que la chaîne branchée — les orphelines sont
+invisibles. C'est ce qui a masqué le problème.
+
+Le nettoyage automatique que j'ai lancé ensuite a **supprimé les 5 events Enhanced Input** de
+`BP_PlayerCharacter` : `find_nodes(entry_points_only=True)` ne les considère pas comme des points
+d'entrée, donc mon calcul d'accessibilité les classait morts. Reconstruits à la main
+(`create_node` + `connect_pins`), vérifiés nœud par nœud.
+
+### Règles qui en sortent
+
+1. **Ne jamais écrire un argument en positionnel** dans le DSL, même en recopiant la sortie de
+   `read_graph_dsl` — qui, elle, écrit en positionnel. Toujours `:NomDuPin valeur`.
+2. **Après écriture, relire les *valeurs de pins*, pas seulement le DSL.** Un argument perdu laisse
+   le défaut du pin (`false`, `0.0`) : le graphe compile, la relecture DSL paraît correcte, et le
+   comportement est faux. Un balayage « pin non connecté ET valeur vide » ne suffit pas — `false`
+   n'est pas vide.
+3. **`write_graph_dsl` empile.** Après chaque écriture, compter les nœuds
+   (`find_nodes(graph, title="")`) et purger l'accessibilité par **exec**, en traitant les events
+   Enhanced Input comme des points d'entrée (`find_nodes(entry_points_only=True)` les rate).
+4. **Une hypothèse d'environnement se teste, sinon elle ne compte pas.** Ici : une seule propriété
+   (`MovementMode`) séparait « le monde ne ticke pas » de « notre composant ne ticke pas ».
+
+---
+
+## Vérification (2026-08-19, après correction)
+
+En jeu, en PIE, input simulé — `bThrottleCPUWhenNotForeground` est à `false` sur ce poste, donc PIE
+tourne à 60 fps même sans focus et le test bout en bout est fiable :
 
 | Vérifié | Résultat |
 |---|---|
-| Compilation `warnings_as_errors` | **2/2** — `BPC_MovementState`, `BP_PlayerCharacter` |
-| Relecture DSL de chaque graphe écrit | 9/9 conformes à l'intention (2 bugs corrigés au passage) |
-| Câblage d'input du J2 préservé | 18 liens d'origine intacts, 25 nœuds au total |
-| `IA_Jump` → `SpaceBar` dans `DefaultKeyMappings` | présent |
-| Cache de tuning en PIE | les 11 `Tune_*` du J3 chargés depuis `DA_Movement_Default` |
+| Compilation `warnings_as_errors` | **2/2** |
+| Le Tick tourne | `MaxAcceleration` = **4000** (`Accel_Ground`, écrit par `DriveCMC`), `bIsGrounded` = **true**, `LastGroundedTime` incrémenté chaque frame |
+| **F3** → `IA_DebugToggle` | `bDebugEnabled` bascule `true` → `false` ✅ |
+| **Espace** → `IA_Jump` → `TryJump` → `DoJump` | `Idle → Jumping`, `VerticalSpeed` = **860.8** (900 − 1 frame de gravité) ✅ |
+| Cycle d'atterrissage | `PreviousState` = `Falling`, `LandedTime` = 22.97 s pour un saut à 22.19 s → **0,77 s d'air**, conforme à `Jump_ZVelocity 900` / `Gravity 2.4` ✅ |
+| `HandleLanded` s'exécute | `bJumpConsumed` remis à `false`, `JumpBufferedTime` = `-1` ✅ |
 | `Tune_AirStrafeGainAngleCos` | **−0.7071** = `cos(135°)` ✅ conforme à `§7.1` |
-| Erreurs runtime au `BeginPlay` | **0** |
+| Graphes purgés | `BPC_MovementState` 101 → 35 nœuds, doublons J2 inclus ; `BP_PlayerCharacter` 24 nœuds, 5 events d'input recâblés |
+| Erreurs runtime | **0** |
 
-**Ce que je n'ai pas pu vérifier :** le comportement en jeu. Le monde PIE n'avance pas quand
-l'éditeur n'a pas le focus — les appels MCP s'exécutent sur le game thread. Même limite qu'au J2.
-`BeginPlay` s'exécute bien (caches résolus, `CachedCMC` / `CachedCharacter` valides), mais aucun
-Tick ne tourne tant que Louis n'a pas la fenêtre au premier plan.
+**Ce qui reste non vérifié, et ne peut pas l'être par un agent :** le *ressenti*. L'air strafe n'a
+pas été éprouvé manche en main — c'est la checklist ci-dessous, et c'est la R8.
 
 ---
 
