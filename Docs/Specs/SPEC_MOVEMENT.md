@@ -991,6 +991,24 @@ SLIDE   t 0.42 / 1.20   sliding true   forced false   slope 0.50   entry 1500.00
 15° / 30° / 45°), < 0 en montée, ≈ 0 sur le plat. `forced` = capsule coincée sous un plafond.
 `entry` = `HorizontalSpeed` au moment de l'entrée en slide.
 
+**Ligne `DECAY` ajoutée au J6**, clé `OD_9_Decay`, dessinée par `BPC_MovementState.DrawDecayDebug`
+(appelée en **queue** de la chaîne de Tick, après `DrawDebugOverlay` — un seul nœud ajouté, aucune
+réécriture du code validé) :
+
+```
+DECAY   active false   why grace   excess +1340.0   above 1.85   rate 400.0   cap 1500.0
+```
+
+`why` nomme **laquelle des 4 conditions de `ApplyMomentumDecay` bloque** : `atcap` (on est déjà au
+plafond) · `air` (pas au sol) · `state` (état non éligible : slide, dash, wall ride, saut, chute) ·
+`grace` (fenêtre de grâce en cours). `-` quand la décroissance tourne. `above` = **temps cumulé passé
+au-dessus du cap** depuis le dernier retour au plafond.
+
+> **Pourquoi cette ligne existe.** `ApplyMomentumDecay` a été **morte pendant 3 jours** (J2 → J5,
+> `12_PIEGES §6.14`) sans que personne le voie : l'overlay affichait le cap et la grace, mais rien
+> qui dise si la décroissance **tournait**. C'est l'instrument qui manquait, pas la valeur.
+> Le chiffre à lire au J7 est le **ratio de temps où `active = true`** pendant un enchaînement.
+
 **Ligne `WALLRIDE` ajoutée au J6**, clé `OD_8_WallRide`, **dessinée par `BPC_WallRide` lui-même**
 (même principe que `BPC_Slide` : il lit `MovementState.bDebugEnabled`, donc `F3` pilote les trois) :
 

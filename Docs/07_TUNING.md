@@ -68,8 +68,41 @@ la lisibilité du niveau est une contrainte de design forte (`Docs/Specs/SPEC_LE
 | `Speed_HardCap` | 6000 | uu/s | À CALIBRER | plafond absolu, sécurité collision |
 | `Accel_Ground` | 4000 | uu/s² | À CALIBRER | montée en vitesse progressive |
 | `Accel_Air` | 4000 | uu/s² | À CALIBRER | `CMC.MaxAcceleration` en l'air. Avec `AirStrafe_AirControl`, donne l'accélération de contrôle aérien : `0.85 × 4000 = 3400 uu/s²`. **Ne pilote pas le gain de vitesse** (c'est `AirStrafe_SpeedGainPerSec`) |
-| `MomentumDecayRate` | 400 | uu/s² | À CALIBRER | perte au sol au-dessus du sprint cap. **Inopérante du J2 au J5** (`12_PIEGES §6.14`), réparée et **validée telle quelle par Louis au J5** — valeur conservée, jamais retunée. Repère : 3.75 s pour ramener 3000 → 1500 |
-| `MomentumDecay_GraceTime` | 0.35 | s | À CALIBRER | délai avant que la décroissance démarre |
+| `MomentumDecayRate` | 400 | uu/s² | **⚠️ À RETUNER AU J7** | perte au sol au-dessus du sprint cap. **Inopérante du J2 au J5** (`12_PIEGES §6.14`), réparée au J5 — jamais retunée depuis qu'elle pilote quelque chose. Repère : 3.75 s pour ramener 3000 → 1500 |
+| `MomentumDecay_GraceTime` | 0.35 | s | **⚠️ À RETUNER AU J7** | délai avant que la décroissance démarre. **Réarmée par `HandleLanded`, `EndDash` ET `EndWallRide`** — c'est probablement elle le vrai bouton, pas le taux |
+
+> ### ⚠️ Le couple décroissance / grace est le chantier n°1 du J7
+>
+> **Constat de Louis au J6** : « c'est un peu trop simple d'accumuler de la vitesse sans la perdre ».
+>
+> `ApplyMomentumDecay` ne tourne **que si les 4 conditions sont réunies** :
+> `bIsGrounded` **ET** état ∈ {`Idle`, `Walking`, `Sprinting`} **ET** `Grace ≤ 0` **ET** `vitesse > cap`.
+> Donc **jamais en l'air, jamais en slide / dash / wall ride / saut / chute.** C'est voulu : la
+> décroissance est le prix du *j'arrête d'enchaîner*, pas une punition d'erreur (`§10` s'en charge).
+>
+> **Le risque n'est pas le taux, c'est la grace.** `StartGrace(0.35 s)` est appelée par **trois**
+> endroits — `HandleLanded`, `EndDash`, `EndWallRide`. Au J7 le bunny hop fait atterrir toutes les
+> ~0.6 s : **chaque atterrissage réarme 0.35 s de grace**, donc la décroissance ne tourne qu'une
+> fraction du temps, et pendant une chaîne wall ride → wall jump → atterrissage → dash elle peut
+> **ne jamais tourner**. C'est la famille exacte de **D41** (fenêtre de slide réarmée par le dash),
+> qui avait coûté un playtest à accuser le dash à tort.
+>
+> **Mesurer avant de tuner.** L'overlay `F3` affiche depuis le J6 une ligne `DECAY` (`OD_9_Decay`)
+> qui donne `active`, **laquelle des 4 conditions bloque** (`atcap` / `air` / `state` / `grace`),
+> l'excès au-dessus du cap, et le **temps cumulé passé au-dessus du cap**. Le chiffre à regarder est
+> le **ratio de temps où `active = true`** pendant une chaîne. S'il est proche de zéro, c'est
+> `MomentumDecay_GraceTime` qu'il faut baisser, **pas** `MomentumDecayRate` qu'il faut monter.
+>
+> Ordres de grandeur, sortie de wall ride à 2500 uu/s (retour au sprint cap 1500) :
+>
+> | `MomentumDecayRate` | temps pour retomber au cap | + grace | distance parcourue |
+> |---|---|---|---|
+> | **400** (actuel) | 2.5 s | ~2.85 s | ~5700 uu |
+> | 600 | 1.7 s | ~2.0 s | ~4000 uu |
+> | 800 | 1.25 s | ~1.6 s | ~3200 uu |
+>
+> Après une grosse chaîne à 4000 uu/s, l'actuel donne **6.25 s** au-dessus du cap, soit la quasi-
+> totalité d'un niveau court. **Hypothèse de départ à tester, pas à croire : 600–800.**
 | `SpeedRetention_Landing` | 0.92 | ratio | À CALIBRER | vitesse conservée à l'atterrissage |
 | `SpeedRetention_Jump` | 1.0 | ratio | À CALIBRER | saut = pas de perte horizontale |
 | `Speed_IdleThreshold` | 50 | uu/s | À CALIBRER | en dessous et sans input → état `Idle` |
