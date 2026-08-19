@@ -46,7 +46,7 @@ Supprimer une feature qui ne fonctionne pas n'est pas un échec, c'est la métho
 | # | Test | Quand | Réponse | Date |
 |---|---|---|---|---|
 | **1** | Le joueur joue 5 minutes sans aucun contenu. Le mouvement est-il amusant ? | Gate S1 | ✅ **OUI** — 5 min jouées par Louis, « sans souci », avec sprint + saut + air strafe seuls | 2026-08-19 (J3) |
-| **2** | Peut-il atteindre une vitesse élevée en maîtrisant plusieurs mécaniques ? | Gate S1 | ⏳ partiel — l'air strafe passe le sprint cap (2121 uu/s en diagonale). À rejuger au J7 avec slide + dash + wall ride | — |
+| **2** | Peut-il atteindre une vitesse élevée en maîtrisant plusieurs mécaniques ? | Gate S1 | ✅ **OUI** — validé sur les **6** mécaniques (sprint, saut, air strafe, slide, dash, wall ride) après le retune du momentum à `800 / 0.25` : « tout marche correctement ». *Pic de vitesse non relevé — à chiffrer au premier passage de score (J18).* | 2026-08-19 (J7) |
 | **3** | Est-il plus intéressant de tuer un ennemi en mouvement que de s'arrêter ? | Gate S2 | | |
 | **4** | Un headshot procure-t-il une vraie satisfaction ? | Gate S2 | | |
 | **5** | Un impact ennemi fait-il réellement *ressentir* une erreur ? | Gate S2 | | |
@@ -56,9 +56,14 @@ Supprimer une feature qui ne fonctionne pas n'est pas un échec, c'est la métho
 
 ### Gates de fin de semaine
 
-**🚦 GATE SEMAINE 1 — le mouvement**
+**🚦 GATE SEMAINE 1 — le mouvement** → ✅ **PASSÉE le 2026-08-19**
 Tests 1 et 2 doivent passer. Si non : **on ne commence pas le combat.** On reste sur le mouvement.
 C'est le seul système dont l'échec justifie de tout arrêter (`Docs/03_SCOPE_LOCK.md §6`, palier Stop).
+
+> **Passée avec 6 mécaniques et non 7** : le bunny hop a été construit, mesuré, puis **coupé au J7**
+> sur le feeling (`D52`, `07_TUNING §6`). Le gain de vitesse au-dessus du sprint cap est l'affaire du
+> seul air strafe, complété par le slide en pente, le dash et le wall ride.
+> **La semaine 2 (combat) est débloquée.**
 
 **🚦 GATE SEMAINE 2 — le combat**
 Tests 3, 4, 5. Le joueur doit pouvoir enchaîner :

@@ -317,12 +317,66 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       **`AddTickPrerequisiteComponent(BPC_Dash)`** qui supprime la seule faille théorique — les deux
       composants avaient `MovementState` comme prérequis, leur **ordre relatif était indéterminé**.
 
-### J7 — Bunny hop & intégration
-- [ ] Bunny hop : fenêtre de timing, skip de friction, gain, plafond
-- [ ] Matrice d'interactions validée (`Docs/Specs/SPEC_MOVEMENT.md §11`)
-- [ ] Parcours sandbox complet enchaînant les 7 mécaniques
-- [ ] Premier passage de tuning avec Louis
-- [ ] **🚦 GATE SEMAINE 1** — cf. `Docs/10_DEFINITION_OF_DONE.md §3`
+### J7 — Bunny hop & intégration  *(implémenté le 2026-08-19, cf. `Docs/Journal/2026-08-19_J7_BunnyHop.md`)*
+- [x] **Parcours sandbox complet enchaînant les 7 mécaniques** — *fait en premier, avant le code*
+      → **Zone K** (`SPEC_MOVEMENT §13.2`), 10 acteurs : rampe d'accès 30° → plateau → rampe de slide
+      30° → deck → **gap de 1200** → virage → couloir → **gap de 1800** → wall ride → wall jump →
+      atterrissage → retour au sol pour la ligne de hops. Géométrie **vérifiée par traces physiques**.
+      → Le sol du sandbox étant un mesh plein, **le circuit est surélevé à `Z = 400`** : c'est la seule
+      façon d'avoir de vrais trous. Tomber = 400 uu de chute, jamais bloquant.
+      → Les deux gaps sont dimensionnés sur la portée d'un saut (`v × 0.765 s`) : 1200 exige ~1600 uu/s,
+      1800 exige ~2400 uu/s **ou** un wall ride. **Le gap 1 est l'instrument du retune du momentum.**
+      → Premiers murs de wall ride qui ne sont pas des cubes : 2 × `SM_Module_WallRide_1600` du kit
+      livré le même jour — c'est ce qui a contourné le piège **§5.15**.
+- [-] **Bunny hop — COUPÉ DU SCOPE le jour même (D52), après playtest**
+      → **« ça rajoute trop de vitesse, je n'aime pas ; juste avant c'était vraiment bien »** (Louis).
+      Le gain de vitesse reste l'affaire du **seul air strafe**. `BPC_MovementState` est revenu
+      exactement à son état du J6 — 15 nœuds dans `DoJump`, 37 dans le Tick, 33 fonctions,
+      61 variables, vérifié compteur par compteur. Les 4 clés `BHop_*` restent dans `07_TUNING §6`
+      marquées `COUPÉ`, lues par aucun code.
+      → **Ce n'est pas un échec technique** : la feature marchait et était mesurée (2000 → 2120 uu/s).
+      C'est `10_DEFINITION_OF_DONE §2` appliqué — *pas fun → supprimer*. Même famille que **D24**
+      (le slide qui donnait « trop de boost sans effort »).
+      → Ce que la journée garde quand même : le bug d'**`AddSpeedGain`** (ci-dessous) et la
+      discipline qui a rendu la suppression triviale — **aucune réécriture de code validé**, donc
+      retirer 4 nœuds d'appel a suffi à défaire la feature.
+      → *Détail de ce qui avait été construit, pour le jour où la question se reposerait :*
+      **dans `BPC_MovementState`**, pas un composant autonome : c'est une modification de
+      l'atterrissage et du saut, pas un pilote de vélocité (`SPEC_MOVEMENT §6.1`).
+      → 4 fonctions (`CacheBHopTuning`, `TryBunnyHop`, `UpdateBHopChain`, `DrawBHopDebug`),
+      8 variables, et **3 insertions de nœuds** — zéro réécriture de code validé.
+      → **D50** — l'annulation de la perte d'atterrissage se fait par
+      `max(PreLandSpeed, VitesseCourante) + Gain`, appliqué à la **vélocité du CMC** et non à la
+      variable `HorizontalSpeed` (leçon `12_PIEGES §6.14`). Le `max` évite qu'un hop *réduise* la
+      vitesse quand on arrive d'une pente.
+      → **D51** — `BHop_FrictionSkip` reste **sans code** : l'anti-freinage de `DriveCMC` rend la
+      friction inopérante au-dessus du cap, et `BPC_Slide` possède déjà `GroundFriction`.
+      → **Vérifié en PIE, sans Louis** : `2000 uu/s → hop → 2120 au ré-atterrissage`, chaîne à 1,
+      gain 120, source `"BunnyHop"`. Échafaudage (fenêtre à 60 s, `F5 → IA_Jump`) **restauré et
+      revérifié clé par clé**.
+      → ⚠️ **`AddSpeedGain` est inopérante** (elle n'écrit que `HorizontalSpeed`, jamais la vélocité) :
+      même famille que D40. **Zéro appelant** dans le projet, donc sans effet aujourd'hui — à réparer
+      avant les upgrades du J20.
+- [x] Matrice d'interactions validée (`Docs/Specs/SPEC_MOVEMENT.md §11`)
+      → validée **sur la base des playtests J4/J5/J6 + la manche du J7** : dash pendant slide (D42),
+      slide pendant dash, slide d'atterrissage, jump pendant wall ride, dash pendant wall ride.
+      Les 2 lignes qui concernaient le bunny hop sont **sans objet** depuis D52.
+- [x] **Retune `MomentumDecayRate` / `MomentumDecay_GraceTime`** — *chantier n°1 du J7*
+      → **`400 → 800` et `0.35 → 0.25`**, tranché par Louis. Sortie de wall ride à 2500 uu/s : la
+      vitesse excédentaire dure **1.50 s au lieu de 2.85 s** (~3000 uu au lieu de ~5700).
+      Vérifié en PIE que le composant lit bien les nouvelles valeurs au `BeginPlay`.
+      → Répond au constat du J6 : « c'est un peu trop simple d'accumuler de la vitesse sans la perdre ».
+- [x] **`AddSpeedGain` réparée** — elle n'écrivait que la variable `HorizontalSpeed`, jamais la
+      vélocité : même bug que D40, inopérante depuis le J2. **Zéro appelant**, donc aucune régression
+      possible — la mine est désamorcée avant les upgrades du J20. L'écriture DSL avait **empilé**
+      l'ancienne version (42 nœuds au lieu de 14) : 13 nœuds morts purgés par accessibilité exec.
+      Nouveau piège **`12_PIEGES §2.2c`** — un contrôle d'orphelins qui cherche des nœuds *totalement*
+      déconnectés ne voit **jamais** une chaîne empilée, qui est reliée à elle-même.
+- [x] Premier passage de tuning avec Louis
+- [x] **🚦 GATE SEMAINE 1 — PASSÉE** (`Docs/10_DEFINITION_OF_DONE.md §3`)
+      → **Test 1 ✅** (depuis le J3) et **Test 2 ✅** : « tout marche correctement ».
+      Passée avec **6 mécaniques et non 7**, le bunny hop ayant été coupé sur le feeling.
+      **La semaine 2 (combat) est débloquée.**
 
 ---
 
@@ -479,7 +533,7 @@ Par ordre de priorité (`Docs/10_DEFINITION_OF_DONE.md §4`) :
 
 | Semaine | Heures prévues | Heures réelles | Gate passée ? | Décision de scope |
 |---|---|---|---|---|
-| S1 | 20 h | | | |
+| S1 | 20 h | J1→J7 bouclés en **2 jours calendaires** (2026-08-18 → 19) | ✅ **oui**, le 2026-08-19 | **Bunny hop retiré du scope (D52)** — le mouvement v1 compte 6 mécaniques, pas 7. Retrait *par le test*, pas par manque de temps |
 | S2 | 20 h | | | |
 | S3 | 20 h | | | |
 | S4 | 20 h | | | |

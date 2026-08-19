@@ -22,8 +22,15 @@ Toute idée qui apparaît pendant le développement doit répondre **oui** à :
 ## 1. DANS le scope (v1) — verrouillé
 
 ### Mouvement
-Sprint · Jump · Slide · Dash 360° · Wall Ride · Bunny Hop · Air Strafing ·
+Sprint · Jump · Slide · Dash 360° · Wall Ride · ~~Bunny Hop~~ · Air Strafing ·
 système de vitesse continue · momentum · perte de vitesse sur erreur · coyote time · jump buffer
+
+> **~~Bunny Hop~~ — sorti du scope le 2026-08-19 (D52, `07_TUNING §6`).** Construit et mesuré au J7,
+> refusé par Louis au playtest le jour même : « ça rajoute trop de vitesse, juste avant c'était
+> vraiment bien ». **Le gain de vitesse est l'affaire du seul air strafe.**
+> Le mouvement v1 compte donc **6 mécaniques, pas 7** — mettre à jour toute formule qui dit « les 7 ».
+> C'est un retrait **par le test**, pas par manque de temps : il ne se rattrape pas en fin de projet
+> et ne va **pas** au backlog §4, il est refusé sur le fond.
 
 ### Combat
 Laser hitscan semi-auto · jauge de Heat · Overheat · Headshots · Melee · Knockback ·

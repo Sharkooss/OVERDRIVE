@@ -185,6 +185,12 @@ TICK(dt)
 10. si bDebugEnabled → §13
 ```
 
+> **Chaîne réelle au J7, après la suppression du bunny hop** (`EventTick`, dans l'ordre) :
+> `HorizontalSpeed` / `VerticalSpeed` / `bIsGrounded` → `UpdateJumpTimers` → `ResolveState` →
+> `ConsumeBufferedJump` → `UpdateSpeedCap` → `UpdateGrace` → `ApplyMomentumDecay` → `ApplyAirStrafe`
+> → `ClampToHardCap` → `DriveCMC` → `BroadcastSpeed` → `DrawDebugOverlay` → `DrawDecayDebug`.
+> **37 nœuds, identique au J6.**
+
 > **L'ordre 6–8 est critique** (corrigé au J3). `DriveCMC` placé avant l'air strafe calcule
 > `MaxWalkSpeed` sur la vitesse d'avant le gain ; le CMC reclampe dessus à la frame suivante et
 > le joueur reste bloqué à `Speed_SprintCap`. Détail et règle générale : **§7.4**.
@@ -499,7 +505,20 @@ OnLanded(Hit)                                                      ← Event Lan
 
 ---
 
-## 6. Bunny hop
+## 6. Bunny hop — ⛔ **COUPÉ DU SCOPE (D52, playtest J7)**
+
+> **Implémenté le 2026-08-19, supprimé le même jour.** Verdict de Louis manche en main :
+> « ça rajoute trop de vitesse, je n'aime pas ; juste avant c'était vraiment bien ».
+> **Le gain de vitesse reste l'affaire du seul air strafe (§7).**
+>
+> `BPC_MovementState` est revenu **exactement** à son état du J6 (15 nœuds dans `DoJump`, 37 dans le
+> Tick, 33 fonctions, 61 variables). Les 4 clés `BHop_*` restent dans `07_TUNING §6`, marquées
+> `COUPÉ`, lues par aucun code.
+>
+> **La section ci-dessous est conservée telle quelle** : elle décrit un modèle qui a été construit,
+> mesuré (2000 → 2120 uu/s) et refusé sur le feeling — pas sur un bug. Elle sert de point de départ
+> si la mécanique revient un jour, ce qui exige un **arbitrage explicite de Louis**.
+> Détail de la suppression : `Docs/Journal/2026-08-19_J7_BunnyHop.md`.
 
 Le bunny hop est le mécanisme qui **annule la punition de l'atterrissage** et donne un gain net.
 
@@ -514,6 +533,103 @@ Le bunny hop est le mécanisme qui **annule la punition de l'atterrissage** et d
 
 **Feedback attendu** (obligatoire, sinon la mécanique est illisible) : son de hop dont le pitch monte avec `ChainCount`,
 flash court sur `WBP_SpeedMeter`, compteur `x N` à l'écran. Un hop raté doit s'entendre différemment d'un hop réussi.
+
+### 6.1 Archive d'implémentation (J7, 2026-08-19) — **code supprimé le jour même**
+
+> ⚠️ **Plus rien de ce qui suit n'existe dans le projet.** Section conservée à titre d'archive :
+> elle dit *comment* la mécanique avait été construite, pour ne pas repartir de zéro si Louis la
+> rouvre. Les deux enseignements qui **survivent à la suppression** sont signalés en gras :
+> le bug d'`AddSpeedGain` et la décision `D51` sur `GroundFriction`.
+
+Le bunny hop vivait **dans `BPC_MovementState`**, pas dans un composant autonome : c'est une
+modification de l'atterrissage et du saut, pas un pilote de vélocité qui aurait besoin du dernier
+mot dans le Tick (contrairement à `BPC_Dash` D32 et `BPC_WallRide`).
+
+**4 fonctions, 8 variables, 3 insertions de nœuds. Aucune réécriture de code validé** — ce qui est
+précisément ce qui a rendu la **suppression triviale et vérifiable** : retirer 4 nœuds d'appel,
+rétablir un lien, supprimer 4 graphes et 8 variables, et les compteurs sont retombés sur les valeurs
+du J6. Une feature écrite en modifiant du code validé ne se serait pas défaite comme ça.
+
+| Fonction | Où elle est appelée | Rôle |
+|---|---|---|
+| `CacheBHopTuning()` | fin d'`EventBeginPlay` | cache les 4 clés `BHop_*` du DataAsset |
+| `TryBunnyHop()` | **`DoJump`, avant l'impulsion** | fenêtre, annulation de la perte, gain, chaîne |
+| `UpdateBHopChain()` | fin du Tick | remet la chaîne à zéro si un atterrissage n'est **pas** suivi d'un saut |
+| `DrawBHopDebug()` | fin du Tick | ligne `BHOP` de l'overlay `F3`, clé `OD_10_BHop` |
+
+> `CacheTuning` n'a **pas** été rallongée : ses 55 nœuds auraient dû être réécrits en entier, avec le
+> risque d'empilement de `12_PIEGES §2.2b`. Une seconde fonction de cache coûte un nœud d'appel.
+
+#### `D50` — l'annulation de la perte se fait par `max(PreLandSpeed, VitesseCourante)`
+
+`HandleLanded` applique `SpeedRetention_Landing` **immédiatement** au contact, et met la vitesse
+d'avant-contact en cache dans `PreLandSpeed` (ça, c'était déjà le cas depuis le J3). `TryBunnyHop`
+ne « désapplique » donc pas la rétention : il **remonte la vélocité** à
+`max(PreLandSpeed, VitesseCourante) + Gain`.
+
+Le `max` protège le cas où la vitesse a **augmenté** depuis l'atterrissage (pente en slide) : un hop
+ne doit jamais *réduire* la vitesse. Sans lui, glisser sur une descente puis hopper coûterait de la
+vitesse.
+
+**La vélocité du CMC est mise à l'échelle, pas la variable `HorizontalSpeed`** — c'est la leçon de
+`12_PIEGES §6.14` (D40) : `ClampToHardCap` recalcule `HorizontalSpeed` depuis la vélocité réelle
+deux étapes plus loin dans le même Tick, donc écrire la variable est du code mort.
+
+> ### ✅ DETTE SOLDÉE — `AddSpeedGain` réparée (J7, fin de journée)
+>
+> **Le bug.** Cette fonction publique (`§2.2`) n'écrivait que la **variable** `HorizontalSpeed`,
+> jamais la vélocité du CMC. `ClampToHardCap` recalcule cette variable depuis la vélocité réelle
+> deux étapes plus loin dans le même Tick : **tout gain accordé était effacé avant d'avoir eu le
+> moindre effet.** Mot pour mot `12_PIEGES §6.14`, le bug qui a tué la décroissance du J2 au J5.
+> Aucun appelant ne l'avait encore révélé — le premier aurait été le J20 (upgrades de vitesse).
+>
+> **Le correctif**, calqué sur `ApplyMomentumDecay` (D40) :
+>
+> ```
+> spd    = VectorLengthXY(CMC.Velocity)          ← la source de vérité, plus la variable
+> target = min(spd + Amount, Speed_HardCap)
+> scale  = spd > 0.01 ? target / spd : 1.0       ← pas de direction à 0, on ne touche à rien
+> SetHorizontalSpeed(target)                     ← AVANT l'écriture de vélocité, cf. ci-dessous
+> CMC.Velocity = (vx × scale, vy × scale, vz)    ← Z intact : un gain est horizontal
+> ```
+>
+> **L'ordre des deux écritures n'est pas cosmétique.** `spd` et `target` sont des nœuds *purs*,
+> réévalués à chaque fois qu'on tire leur sortie. Écrire la vélocité en premier ferait relire `spd`
+> sur la vélocité **déjà modifiée**, et `HorizontalSpeed` recevrait le gain **deux fois**.
+> C'est la famille `12_PIEGES §2.3b`, transposée du cas « variable Blueprint » au cas
+> « propriété moteur ». Règle : **quand un `Set` et un calcul lisent la même source, le calcul passe
+> en premier.**
+>
+> **Vérifié** : chaîne exec unique de 8 nœuds, 29 nœuds au total, compilation `warnings_as_errors`
+> sans un warning. L'écriture DSL avait **empilé** l'ancienne implémentation (`§2.2b`) — 13 nœuds
+> morts détectés par accessibilité exec et purgés, dont le `GetHorizontalSpeed` de l'ancienne
+> version, qui signait le code à supprimer.
+
+#### `D51` — `BHop_FrictionSkip` reste sans code
+
+Voir `07_TUNING §6`. Résumé : l'anti-freinage de `DriveCMC` rend la friction sans effet au-dessus du
+cap, et `BPC_Slide` possède déjà `GroundFriction`. Ajouter un second écrivain rejouerait `§6.13`.
+
+#### Vérifié en PIE, sans Louis (2026-08-19)
+
+Fenêtre élargie temporairement à 60 s (piège `4.12` : on allonge une fenêtre courte par le tuning,
+jamais par le temps), `IA_Jump` mappée sur `F5` dans `IMC_Debug` (recette `4.11`), puis **échafaudage
+restauré et revérifié valeur par valeur**.
+
+| Grandeur | Attendu | Mesuré |
+|---|---|---|
+| `PreLandSpeed` au 1ᵉʳ atterrissage | 2000 (vitesse injectée) | **2000** |
+| `BHopChainCount` | 0 → 1 | **1** |
+| `BHopChainGain` | `BHop_SpeedGain` | **120** |
+| `LastGainSource` | `"BunnyHop"` | **"BunnyHop"** |
+| `PreLandSpeed` au ré-atterrissage | `2000 + 120` | **2120** |
+
+La dernière ligne est celle qui prouve tout : le joueur est reparti à **2120**, donc la vélocité a
+réellement été mise à l'échelle (une écriture de variable seule aurait laissé 2000). C'est le couple
+entrée/sortie de `12_PIEGES §4.13`.
+
+**Ce qui n'est pas prouvé et attend la manche de Louis** : que la fenêtre de **0.10 s** soit
+jouable, que 120 uu/s se sente, et que le plafond de 1500 tombe au bon endroit.
 
 ---
 
@@ -1101,9 +1217,72 @@ gain du ride, donc la chaîne doit passer, mais c'est le premier chiffre à revo
 à enchaîner les 3. Géométrie vérifiée par trace physique sur les 6 faces de E, les 3 faces de F et les
 3 bases.
 
-Zones restantes à construire (D, G–K) : au fur et à mesure des mécaniques.
+#### Zone K telle que construite (2026-08-19, J7)
+
+Dossier d'outliner `Sandbox/K_CircuitCombo`, étiquette `TXT_ZoneK`. **10 acteurs.** Elle occupe le
+quadrant `X ∈ [−490, 8400]`, `Y ∈ [−9600, −4550]`, vide jusque-là (la zone B s'arrête à `Y = −3550`,
+les zones E/F à `X = −1000`). Vérifiée **par traces physiques**, pas par lecture de propriétés.
+
+> **Parti pris n°1 — le circuit est surélevé.** Le sol du sandbox est un mesh **plein** de
+> 20000 × 20000 : on ne peut pas y percer un trou (constat déjà fait au J6 pour la zone F). Les deux
+> gaps de la zone K n'existent donc que parce que le parcours court sur un **deck à `Z = 400`**.
+> Tomber dedans coûte une chute de 400 uu sur le sol du sandbox — sanction lisible, jamais bloquante,
+> et on remonte par la rampe d'accès. Aucun kill volume nécessaire.
+
+| Élément | Cotes | Ce qu'il teste |
+|---|---|---|
+| `SM_K_AccessRamp` | 30°, `Z 0 → 1000`, `X −487 → 1245` | montée d'accès, ferme la boucle |
+| `SM_K_StartPlateau` | `X 1245 → 2245`, sommet `Z 1000` | départ |
+| `SM_K_SlideRamp` | **30°**, `Z 1000 → 400`, longueur de pente **1200** | `Slide_SlopeAccelBonus` — entrée 1500 → **~2100 uu/s** |
+| `SM_K_Deck1` | `X 3284 → 6000`, sommet `Z 400` | ligne droite, **c'est là que la décroissance mord** |
+| **GAP 1** | `X 6000 → 7200` = **1200 uu** | dash **ou** vitesse conservée |
+| `SM_K_Deck2` | `X 7200 → 8400` | réception + virage à 90° (`Slide_TurnRate`) |
+| `SM_K_Deck3a` | `Y −6800 → −5450`, couloir large de **1000** | approche du trou |
+| **GAP 2** | `Y −8600 → −6800` = **1800 uu** | **wall ride obligatoire** |
+| `SM_K_WallRideA/B` | 2 × `SM_Module_WallRide_1600`, face interne `X = 7300`, `Y −9600 → −6400` | accroche, ride, wall jump |
+| `SM_K_Deck3b` | `Y −9600 → −8600` | atterrissage du wall jump |
+| *retour* | sol plat, ~8300 uu en diagonale | ligne droite de récupération — **c'est là que la décroissance de momentum se juge** |
+
+**Le dimensionnement des deux gaps est le cœur de la zone.** Portée d'un saut à plat =
+`v × 0.765 s` (§6, `07_TUNING`) :
+
+| Vitesse | Portée | Gap 1 (1200) | Gap 2 (1800) |
+|---|---|---|---|
+| 1500 (sprint cap) | 1148 | ❌ | ❌ |
+| 2100 (sortie de rampe) | 1607 | ✅ | ❌ |
+| 2600 | 1990 | ✅ | ✅ *(ligne rapide)* |
+
+Le **gap 1 est l'instrument du retune de la décroissance** (`07_TUNING §3`) : on sort de la rampe à
+~2100 uu/s et on a 2716 uu de deck à traverser avant de sauter. Si la décroissance est trop forte,
+le gap devient infranchissable sans dash — c'est un signal binaire, lisible sans lire un chiffre.
+
+**Premiers murs de wall ride du projet qui ne sont pas des cubes** : la zone K consomme
+`SM_Module_WallRide_1600` du kit modulaire livré le même jour. C'est aussi ce qui a résolu le
+problème de canal de collision décrit en `12_PIEGES §5.15` — le preset vit sur l'**asset**.
+
+> **Le J7 avait dimensionné le retour comme ligne de bunny hop.** Le bunny hop étant coupé le soir
+> même (`§6`, D52), ce tronçon garde une valeur — c'est la seule longue ligne droite plate du
+> sandbox, donc l'endroit où l'on voit la vitesse redescendre vers le sprint cap. Les deux gaps, eux,
+> sont inchangés : ils étaient dimensionnés sur la portée d'un **saut**, pas sur un enchaînement de hops.
+
+#### Blockout de Louis (2026-08-19, hors zones documentées)
+
+Le dossier `Sandbox/F_EscalierMurs` contient **13 acteurs et non 4** : Louis y a ajouté
+`SM_SandboxF_Step4` → `Step12`, une structure autonome qui s'étend de `X ≈ −12800` à **`X ≈ −35000`**,
+avec des volumes jusqu'à `Z ≈ 4700`. **Elle est très au-delà du sol du sandbox** (qui s'arrête à
+`X = −10000`).
+
+C'est **son** terrain de test, construit à la main pour éprouver les mécaniques ensemble, et il fait
+autorité sur la zone K pour cet usage. Il n'est **pas** relevé ici : ses cotes n'ont pas été
+vérifiées par trace et il est appelé à bouger.
+
+⚠️ Pour un futur agent : ne pas confondre `Step1`–`Step3` (l'escalier de murs du J6, coté et
+vérifié ci-dessus) avec `Step4`–`Step12`. Et **ne rien supprimer dans ce dossier sans demander.**
+
+Zones restantes à construire (D, G–J) : au fur et à mesure des mécaniques.
 | D — Escaliers | Marches de 25 / 50 / 75 uu | `MaxStepHeight`, accrochage d'arête (§15) |
 | ~~E — Couloir wall ride~~ | ✅ **construit au J6** (3 couloirs, cf. ci-dessus) | Alternance de wall rides, `SameWallCooldown` |
+| ~~K — Circuit combo~~ | ✅ **construit au J7** (cf. ci-dessus) | Enchaînement complet, mesure de vitesse de pointe |
 | ~~F — Mur unique~~ | ✅ **remplacé au J6 par l'escalier de 3 murs** — c'est ce que demande la roadmap J6 et le test « enchaîner 3 murs ». Le trou de sol de 400 uu de la spec d'origine est devenu un trou **entre les murs**, le sol du sandbox étant un mesh unique | Wall ride long, durée max, wall jump |
 | G — Gouffres | Gaps de 600 / 900 / 1200 uu | Dash de franchissement, coyote time (bord marqué) |
 | H — Plafond bas + saut | Plateforme à 300 uu avec plafond bas au-dessus | Jump buffer, dé-crouch bloqué en l'air |

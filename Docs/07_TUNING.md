@@ -68,8 +68,8 @@ la lisibilité du niveau est une contrainte de design forte (`Docs/Specs/SPEC_LE
 | `Speed_HardCap` | 6000 | uu/s | À CALIBRER | plafond absolu, sécurité collision |
 | `Accel_Ground` | 4000 | uu/s² | À CALIBRER | montée en vitesse progressive |
 | `Accel_Air` | 4000 | uu/s² | À CALIBRER | `CMC.MaxAcceleration` en l'air. Avec `AirStrafe_AirControl`, donne l'accélération de contrôle aérien : `0.85 × 4000 = 3400 uu/s²`. **Ne pilote pas le gain de vitesse** (c'est `AirStrafe_SpeedGainPerSec`) |
-| `MomentumDecayRate` | 400 | uu/s² | **⚠️ À RETUNER AU J7** | perte au sol au-dessus du sprint cap. **Inopérante du J2 au J5** (`12_PIEGES §6.14`), réparée au J5 — jamais retunée depuis qu'elle pilote quelque chose. Repère : 3.75 s pour ramener 3000 → 1500 |
-| `MomentumDecay_GraceTime` | 0.35 | s | **⚠️ À RETUNER AU J7** | délai avant que la décroissance démarre. **Réarmée par `HandleLanded`, `EndDash` ET `EndWallRide`** — c'est probablement elle le vrai bouton, pas le taux |
+| `MomentumDecayRate` | **800** | uu/s² | **RETUNÉ AU J7** (était 400) | perte au sol au-dessus du sprint cap. **Inopérante du J2 au J5** (`12_PIEGES §6.14`), réparée au J5. Repère : **1.9 s** pour ramener 3000 → 1500, soit ~4300 uu parcourus |
+| `MomentumDecay_GraceTime` | **0.25** | s | **RETUNÉ AU J7** (était 0.35) | délai avant que la décroissance démarre. **Réarmée par `HandleLanded`, `EndDash` ET `EndWallRide`** |
 
 > ### ⚠️ Le couple décroissance / grace est le chantier n°1 du J7
 >
@@ -103,6 +103,42 @@ la lisibilité du niveau est une contrainte de design forte (`Docs/Specs/SPEC_LE
 >
 > Après une grosse chaîne à 4000 uu/s, l'actuel donne **6.25 s** au-dessus du cap, soit la quasi-
 > totalité d'un niveau court. **Hypothèse de départ à tester, pas à croire : 600–800.**
+>
+> #### État au J7 (2026-08-19) — **les deux valeurs sont toujours à 400 et 0.35, volontairement**
+>
+> Le J7 a livré les deux prérequis de la mesure et **n'a touché à aucune des deux clés** :
+> - **l'instrument** — ligne `DECAY` de l'overlay `F3` (posée au J6) ;
+> - **le terrain** — la **zone K** du sandbox (`SPEC_MOVEMENT §13.2`), qui est le premier endroit du
+>   projet où une chaîne complète est possible.
+>
+> **Le ratio ne se mesure pas sans jouer** (`CLAUDE.md` R8) : aucun outil ne sait enchaîner
+> rampe → slide → gap → wall ride → wall jump → hops. La mesure est donc **à faire par Louis**,
+> et le retune se décide après. Tuner à l'aveugle ici produirait exactement les deux valeurs
+> fausses qui s'annulent contre lesquelles ce bloc met en garde.
+>
+> ### ✅ Retune fait — **`800` / `0.25`**, décidé par Louis le 2026-08-19 (fin de J7)
+>
+> Le bunny hop ayant été coupé le même soir (**D52**, §6), le risque annoncé plus haut — une grace
+> réarmée toutes les 0.77 s qui aurait faussé la mesure — **n'existe plus**. Les réarmeurs
+> redeviennent les trois d'origine : `HandleLanded`, `EndDash`, `EndWallRide`.
+>
+> Louis a tranché sur le **haut** de la fourchette proposée (600–800) et a resserré la grace :
+> le taux **double** et le délai passe sous le quart de seconde. Effet combiné, sortie de wall ride
+> à 2500 uu/s :
+>
+> | | avant (400 / 0.35) | **après (800 / 0.25)** |
+> |---|---|---|
+> | temps pour retomber au cap | 2.5 s + grace = **2.85 s** | 1.25 s + grace = **1.50 s** |
+> | distance parcourue au-dessus du cap | ~5700 uu | **~3000 uu** |
+>
+> **La vitesse excédentaire ne dure plus qu'un tiers de ce qu'elle durait.** C'est ce que visait le
+> constat du J6 — « c'est un peu trop simple d'accumuler de la vitesse sans la perdre ».
+>
+> ⚠️ **Statut : à confirmer manche en main.** Vérifié en PIE que le composant lit bien `800` / `0.25`
+> au `BeginPlay`, mais la sensation n'a pas encore été jugée. Le signal le plus lisible est le
+> **gap de 1200 uu de la zone K** (`SPEC_MOVEMENT §13.2`) : on sort de la rampe à ~2100 uu/s et on a
+> 2716 uu de deck avant de sauter. À 800 uu/s², ces 2716 uu coûtent maintenant assez de vitesse pour
+> que le saut devienne serré — **si le gap n'est plus franchissable sans dash, c'est trop fort.**
 | `SpeedRetention_Landing` | 0.92 | ratio | À CALIBRER | vitesse conservée à l'atterrissage |
 | `SpeedRetention_Jump` | 1.0 | ratio | À CALIBRER | saut = pas de perte horizontale |
 | `Speed_IdleThreshold` | 50 | uu/s | À CALIBRER | en dessous et sans input → état `Idle` |
@@ -229,10 +265,31 @@ que par slide-boost, dash, wall ride et bunny hop, et **décroît** si le joueur
 | `Jump_MaxCount` | 1 | — | À CALIBRER | pas de double jump (le dash le remplace) |
 | `Jump_CoyoteTime` | 0.12 | s | À CALIBRER | |
 | `Jump_BufferTime` | 0.15 | s | À CALIBRER | saut anticipé avant l'atterrissage |
-| `BHop_PerfectWindow` | 0.10 | s | À CALIBRER | fenêtre après contact sol |
-| `BHop_SpeedGain` | 120 | uu/s | À CALIBRER | gain par hop réussi |
-| `BHop_MaxChainGain` | 1500 | uu/s | À CALIBRER | plafond du gain cumulé par chaîne |
-| `BHop_FrictionSkip` | true | bool | À CALIBRER | pas de friction sol si hop dans la fenêtre |
+| `BHop_PerfectWindow` | 0.10 | s | ⛔ **COUPÉ — D52** | |
+| `BHop_SpeedGain` | 120 | uu/s | ⛔ **COUPÉ — D52** | |
+| `BHop_MaxChainGain` | 1500 | uu/s | ⛔ **COUPÉ — D52** | |
+| `BHop_FrictionSkip` | true | bool | ⛔ **COUPÉ — D52** | |
+
+> ### ⛔ D52 — le bunny hop est coupé du scope (playtest J7, 2026-08-19)
+>
+> **Verdict de Louis, manche en main** : « le bunny hop rajoute trop de vitesse, je n'aime pas ;
+> juste avant c'était vraiment bien ». **Le gain de vitesse reste l'affaire du seul air strafe.**
+>
+> Implémenté le 2026-08-19, **supprimé le même jour** après essai. `BPC_MovementState` est revenu
+> exactement à son état du J6 : 15 nœuds dans `DoJump`, 37 dans le Tick, 33 fonctions,
+> 61 variables — vérifié compteur par compteur.
+>
+> **Les 4 clés restent dans ce tableau, avec leurs valeurs**, pour que la décision soit lisible et
+> réversible. Elles ne sont lues par aucun code. Le DataAsset `PDA_MovementData` les expose toujours.
+>
+> C'est la boucle `10_DEFINITION_OF_DONE §2` appliquée telle quelle : *prototype → test → pas fun →
+> **supprimer***. La feature était fonctionnelle et mesurée (2000 → 2120 uu/s) ; ce n'est pas un bug
+> qui l'a tuée, c'est le game feel. Une deuxième source de vitesse par-dessus l'air strafe rendait
+> l'accumulation trop facile — même famille de constat que **D24** sur le slide (« trop grand boost
+> sans aucun effort »).
+>
+> **Ne pas la réimplémenter sans un arbitrage explicite de Louis.** Si elle revient un jour, le
+> chemin est documenté dans `Docs/Journal/2026-08-19_J7_BunnyHop.md`.
 
 ---
 
