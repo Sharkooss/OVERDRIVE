@@ -174,6 +174,38 @@ Exception : `Pillar`, `Arch`, `Gate` → pivot **bas / centre** (symétriques, t
 | 22 | `SM_Module_Hazard_400` | 400 × 400 × 20 | coin | `OD_LevelGeo` | X/Y ×2/3/4 | plaque de danger — signalétique au sol, pas de logique |
 | 23 | `SM_Module_TraversalStrip_400` | 400 × 20 × 20 | coin | **`NoCollision`** | Z ×2/3/4 | **liseré de traversée** — métronome de vitesse, posé tous les 800–1600 uu le long des couloirs (`SPEC_ART_DIRECTION §8.1`) |
 
+> **État au 2026-08-19 — 7 modules sur 23 sont livrés.** Source : `Art_Source/OD_Modules_Traversal.blend`,
+> exports dans `Art_Source/EnvKit_Modules/`, assets dans `Content/OVERDRIVE/Art/Meshes/Modules/`.
+>
+> | Livré | Dim. mesurée à l'import | Tris | Pivot | Preset |
+> |---|---|---|---|---|
+> | `SM_Module_WallRide_1600` | 1600 × 100 × 800 | 36 | coin `0,0,0` | `OD_WallRideSurface` |
+> | `SM_Module_WallRide_3200` | 3200 × 100 × 1600 | 36 | coin `0,0,0` | `OD_WallRideSurface` |
+> | `SM_Module_TraversalStrip_400` | 400 × 20 × 20 | 12 | coin `0,0,0` | `NoCollision` |
+> | `SM_Module_Gate_Slide` | 400 × 1000 × 800 (ouverture **800 × 150** vérifiée) | 48 | bas/centre `−200,−500,0` | `OD_LevelGeo` |
+> | `SM_Module_Platform_400` | 400 × 400 × 100 | 36 | coin `0,0,0` | `OD_LevelGeo` |
+> | `SM_Module_Platform_800` | 800 × 800 × 100 | 36 | coin `0,0,0` | `OD_LevelGeo` |
+> | `SM_Module_Edge_800` | 800 × 100 × 50 | 24 | coin `0,0,0` | `OD_LevelGeo` |
+>
+> **228 tris pour les 7.** Collision `UCX_` du FBX sur les 6 collisionnables (`convexElems = 1`, 3 pour
+> le portail), Nanite off, slots nommés par token de `PALETTE.md`. **Orientation `+X` conforme à §3**,
+> contrairement au kit de props (§3.1 écart B) — vérifiée par import-témoin, pas déduite.
+>
+> Partis pris de construction, à connaître avant d'en produire d'autres :
+> - **La bande rouge des murs de wall ride est une tranche pleine épaisseur** (Z 280→320), pas un
+>   décalque sur une face : un couloir de deux murs qui se font face est symétrique, et la bande
+>   survit au scale X ×2/3/4.
+> - **Le rouge des plateformes est à Z 60→80, pas au sommet.** La surface d'atterrissage reste blanche ;
+>   le rouge n'est lu que sur les flancs, donc à l'approche. Un dessus saturé de 800 × 800 aurait mangé
+>   le budget de §10.1 règle 5 pour zéro information utile.
+> - **Zéro chanfrein**, par cohérence avec les 40 props existants — à rouvrir globalement quand
+>   `PP_ToonPost` existera, son Sobel sur `WorldNormal` étant censé rattraper les plis internes.
+>
+> **Restent 16 modules** : `Floor_400/800/1600`, `Wall_800/1600`, `Ramp_800x400`, `Ramp_800x800`,
+> `Pillar_200/400`, `Arch_800/1600`, `Tunnel_1600`, `Block_200`, `Beam_1600`, `Hazard_400`.
+> Rappel §3.1 : `Ramp_1600x400`, `Block_200` et `Beam_1600` ont déjà un équivalent au uu près dans le
+> kit de props (`Rooftop_Slope`, `AC_Unit_Small`, `Air_Duct` / `Water_Pipe`).
+
 **23 meshes.** Le kit était verrouillé à 22 ; le n° 23 est ajouté pour concorder avec `SPEC_ART_DIRECTION §8.1`,
 qui en fait un élément **obligatoire** de lisibilité de la vitesse — ce n'est pas un mesh de décor optionnel.
 Aucun autre mesh d'environnement n'est autorisé en v1 hors props de décor non collisionnables.
