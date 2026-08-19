@@ -255,11 +255,67 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       restituée (D41), puis **suppression pure et simple de l'interruption du slide (D42)**.
       Les cinq premières passes réparaient les dégâts d'une coupure qui n'avait pas lieu d'être.
 
-### J6 — Wall ride
-- [ ] `BPC_WallRide` : détection, accroche, maintien, wall jump, cooldown same-wall
-- [ ] Object type `WallRideSurface` + un mur de test
-- [ ] Zone sandbox : 2 murs opposés, 3 murs en escalier
-- [ ] **Test** : enchaîner 3 murs consécutivement est possible et satisfaisant
+### J6 — Wall ride  *(implémenté le 2026-08-19, cf. `Docs/Journal/2026-08-19_J6_WallRide.md`)*
+- [x] `BPC_WallRide` : détection, accroche, maintien, wall jump, cooldown same-wall
+      → composant **autonome** : 45 variables, 21 fonctions, `EventGraph` de 8 nœuds, 1 dispatcher
+      (`OnWallRideStarted`). Zéro modification du Tick de `BPC_MovementState`, comme `BPC_Slide` (D22)
+      et `BPC_Dash` (D32).
+      → **Il tick APRÈS `BPC_MovementState`** (patron `BPC_Dash`, pas patron `BPC_Slide`) : il pilote
+      la vélocité intégralement, il doit avoir le dernier mot. C'est ce qui implémente « air strafe
+      pendant wall ride : désactivé » (`SPEC_MOVEMENT §11`) **sans toucher au code validé du J3**.
+      → Les 4 règles de la passation J5 sont respectées : tick en dernier, lecture de `CMC.Velocity`
+      jamais de `MovementState.HorizontalSpeed` (piège 6.12), `BPC_Slide.UpdateSlidePhysics` gelée
+      pendant `WallRiding` (piège 6.13), et **le wall ride ne coupe rien** (D42).
+      → **`CanEnterState` n'a pas été touchée.** Les 8 cellules de la ligne/colonne `WallRiding`
+      étaient **déjà** conformes à `SPEC_MOVEMENT §1.3` (vérifiées une par une). Le garde-fou de
+      « Wall ride pendant Dash : refusé » (§11) est **structurel** — la détection ne tourne pas quand
+      `CurrentState == Dashing` — exactement la leçon de **D42**.
+      → **D43** — détection par **accumulateur dans le Tick** au lieu du `Timer` de la spec.
+      → **D45** — nouvelle condition de sortie : **contact du sol**. En `MOVE_Flying` le CMC ne
+      détecte pas l'atterrissage ; sans ça le joueur rase le sol en volant jusqu'à la fin des 2 s.
+      → **D46** — `WallRide_CameraTilt` **non câblé** : le roulis caméra est du juice, il est déjà
+      planifié au J14. Le J6 livre la mécanique, pas son habillage (R4).
+- [x] Object type `WallRideSurface` + un mur de test
+      → l'object type `ECC_GameTraceChannel2` et le profil `OD_WallRideSurface` existaient depuis le
+      J1. Les 9 murs des zones E et F les portent, **vérifié par requête physique** (`ObjectTypeQuery8`).
+- [x] Zone sandbox : 2 murs opposés, 3 murs en escalier
+      → **Zone E** — 3 couloirs de 6000 uu (X −7000 → −1000), murs de 800 uu de haut, aux 3 écartements
+      de `07_TUNING §17` : **600 / 1000 / 1400 uu** (Y = 2500 / 0 / −2500).
+      → **Zone F** — 3 murs alternés de 1500 uu, bases en escalier **Z 0 / 150 / 300**, couloir de
+      1400 uu (Y = −6000), trous de 400 uu entre les murs.
+      → Géométrie **vérifiée par trace physique** sur les 6 faces intérieures + les 3 bases.
+      Détail : `SPEC_MOVEMENT §13.2`.
+- [x] **Vérifié en PIE, sans Louis** — les 20 valeurs de tuning cachées correspondent au DataAsset,
+      le composant tick, et **un wall ride complet a été mesuré** : `entrySpeed 2517.9` →
+      `rideSpeed 2417.5` après 2 s, soit exactement `2517.9 × 0.98²`. Sorties `Duration`, `NoWall`
+      et `Grounded` déclenchées et distinguées. Le saut normal **ne régresse pas** malgré
+      l'insertion de `TryWallJump` devant lui dans la chaîne d'input.
+- [x] **Test** : enchaîner 3 murs consécutivement est possible et satisfaisant
+      → **validé par Louis le 2026-08-19** au 2ᵉ playtest : « le game feel sur les murs est nickel,
+      c'est exactement ce que je voulais », « le tilt est good », « le dash ne fait pas bugger la
+      vitesse », « la poussée à l'opposé fonctionne pour le décrochage ».
+      → Le 1ᵉʳ playtest n'a produit **aucun bug** : cinq retours, tous sur le **modèle**. Le wall ride
+      faisait exactement ce que la spec décrivait — et la spec décrivait la mauvaise chose. Une seule
+      passe de refonte (**D47–D49**) a suffi, contre **six** au J5 et **cinq** au J4.
+      → **Écartement de référence tranché : 1000 uu** (couloir E2). Reporté dans `07_TUNING §17`.
+- [x] **Refonte après le 1ᵉʳ playtest** — le mur devient un **sol vertical** :
+      → **D47** — accroche **illimitée**, **à l'horizontale**, à **vitesse strictement constante**.
+      4 clés (`MaxDuration` 2→**0**, `GravityScale` 0.25→**0**, `UpwardBoost` 250→**0**,
+      `SpeedRetention` 0.98→**1.0**) et 2 corrections de graphe. Le modèle d'origine **punissait** le
+      joueur d'être resté sur le mur : il descendait, ralentissait, et était éjecté au bout de 2 s.
+      Mesuré après coup : `entrySpeed = rideSpeed` **au dix-millième**, 5800 uu parcourus sans toucher
+      le sol.
+      → **D48** — le wall jump part **dans la direction du regard** (norme conservée, direction libre —
+      même principe que D37 pour le dash), et il monte enfin plus haut qu'un saut normal :
+      `WallJump_ZVelocity` valait **800** contre `Jump_ZVelocity` = **900**. C'était ça, « le saut du
+      mur est trop faible ». → **1200**. `AwayVelocity` 700 → **1000**.
+      → **D49** — **D46 annulée le jour même** : le roulis caméra est câblé. Ce n'était pas du juice,
+      c'était de la **lisibilité** — collé au mur sans inclinaison, on ne voit pas où on va. Posé dans
+      la `ControlRotation` (seule voie : `bUsePawnControlRotation` écrase tout `SetRelativeRotation`
+      sur la caméra). Vérifié : valeur calculée `0.3699` → roulis réel de la caméra `0.3703`.
+      → **Anti-héritage de la vitesse de dash** (demandé explicitement par Louis) : 3 garde-fous, dont
+      **`AddTickPrerequisiteComponent(BPC_Dash)`** qui supprime la seule faille théorique — les deux
+      composants avaient `MovementState` comme prérequis, leur **ordre relatif était indéterminé**.
 
 ### J7 — Bunny hop & intégration
 - [ ] Bunny hop : fenêtre de timing, skip de friction, gain, plafond

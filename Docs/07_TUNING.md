@@ -285,21 +285,30 @@ franchir, atteindre un mur. Si en playtest il paraît mou, augmenter `Dash_Dista
 | Clé | Valeur | Unité | Statut | Note |
 |---|---|---|---|---|
 | `WallRide_MinEntrySpeed` | 1200 | uu/s | À CALIBRER | |
-| `WallRide_MaxDuration` | 2.0 | s | À CALIBRER | |
+| `WallRide_MaxDuration` | **0** | s | **INACTIVE — VALIDÉ 2026-08-19** | **Playtest J6** : accroche **illimitée** (**D47**). `0` = pas de sortie par durée. Une valeur > 0 la réactive |
 | `WallRide_MaxWallAngle` | 20 | ° | À CALIBRER | écart max à la verticale |
 | `WallRide_DetectDistance` | 70 | uu | À CALIBRER | trace latérale depuis la capsule |
-| `WallRide_GravityScale` | 0.25 | ×G | À CALIBRER | glisse lente vers le bas |
-| `WallRide_SpeedRetention` | 0.98 | ratio/s | À CALIBRER | quasi aucune perte |
-| `WallRide_UpwardBoost` | 250 | uu/s | À CALIBRER | petite montée à l'accroche |
-| `WallJump_ZVelocity` | 800 | uu/s | À CALIBRER | |
-| `WallJump_AwayVelocity` | 700 | uu/s | À CALIBRER | poussée perpendiculaire au mur |
-| `WallJump_ForwardBoost` | 300 | uu/s | À CALIBRER | gain dans l'axe du regard |
+| `WallRide_GravityScale` | **0** | ×G | **INACTIVE — VALIDÉ 2026-08-19** | **Playtest J6** : plus de glisse vers le bas, **l'altitude est verrouillée** pendant le ride (**D47**) |
+| `WallRide_SpeedRetention` | **1.0** | ratio/s | **VALIDÉ 2026-08-19** | **Playtest J6** : la vitesse est conservée **exactement**, ni gain ni perte (**D47**) |
+| `WallRide_UpwardBoost` | **0** | uu/s | **INACTIVE — VALIDÉ 2026-08-19** | **Playtest J6** : on s'accroche **à l'horizontale**, sans pop vertical (**D47**) |
+| `WallJump_ZVelocity` | **1200** | uu/s | **VALIDÉ 2026-08-19** | **Playtest J6** : 800 était **sous** `Jump_ZVelocity` (900) — le wall jump sautait moins haut qu'un saut normal (**D48**) |
+| `WallJump_AwayVelocity` | **1000** | uu/s | **VALIDÉ 2026-08-19** | poussée perpendiculaire au mur (**D48**) |
+| `WallJump_ForwardBoost` | 300 | uu/s | **VALIDÉ 2026-08-19** | gain dans l'axe du regard — inchangé depuis le J1, validé tel quel |
 | `WallRide_SameWallCooldown` | 0.6 | s | À CALIBRER | empêche de camper un seul mur |
-| `WallRide_CameraTilt` | 12 | ° | À CALIBRER | roulis vers l'extérieur |
-| `WallRide_TraceInterval` | 0.03 | s | À CALIBRER | fréquence des traces de détection (~33 Hz), timer et non Tick |
+| `WallRide_CameraTilt` | 12 | ° | **VALIDÉ 2026-08-19** | roulis **vers l'extérieur** — câblé au J6 (**D49**). Signe : `Roll = −WallSide × CameraTilt`. Une valeur **négative** inverse le sens |
+| `WallRide_CameraTiltSpeed` | 10 | /s | **VALIDÉ 2026-08-19** | **J6** — vitesse du `FInterpTo` du roulis, aller **et** retour |
+| `WallRide_TraceInterval` | 0.03 | s | À CALIBRER | fréquence des traces de détection (~33 Hz), **accumulateur dans le Tick** et non timer (**D43**) |
+| `WallRide_DetachDotThreshold` | 0.7 | — | **VALIDÉ 2026-08-19** | **J6** — `Dot(WishDir, Normal)` au-delà duquel l'input compte comme « je pousse loin du mur » (`SPEC_MOVEMENT §9.2`) |
+| `WallRide_DetachHoldTime` | 0.1 | s | **VALIDÉ 2026-08-19** | **J6** — durée de maintien avant décrochage volontaire |
+| `WallRide_MissedTraceTolerance` | 2 | — | À CALIBRER | **J6** — évaluations négatives consécutives avant de lâcher le mur (anti-flicker sur les joints de modules) |
 
 Surfaces éligibles : object type **`WallRideSurface`** (cf. `Docs/06_CONVENTIONS.md §7`).
 Pas de wall ride sur les props ni sur les ennemis.
+
+> Le wall ride réutilise aussi `Capsule_Radius`, `Capsule_HalfHeight`, `MaxStepHeight` (§2),
+> `Speed_HardCap` (§3), `MomentumDecay_GraceTime` (§3), `Input_MoveDeadZone` (§3) et `Gravity` (§2).
+> `Capsule_HalfHeight + MaxStepHeight` = **138 uu** sert de portée à la trace de sol qui met fin au
+> ride (**D45**) — même calibrage que la trace de pente du slide (`12_PIEGES_OUTILLAGE §6.8`).
 
 ---
 
@@ -633,6 +642,13 @@ Ces échelles sont appliquées dans `BP_PlayerCameraManager`, **jamais** dans le
 | Hauteur mini d'un espace de vitesse | 600 uu | À CALIBRER |
 | Distance mini entre 2 murs de wall ride opposés | 600 uu | À CALIBRER |
 | Distance maxi entre 2 murs de wall ride opposés | 1400 uu | À CALIBRER |
+| **Distance de référence entre 2 murs opposés** | **1000 uu** | **VALIDÉ 2026-08-19** |
+
+> **`1000 uu` est l'écartement de référence pour tout couloir de wall ride** (playtest J6).
+> Les 3 écartements ont été construits et joués côte à côte dans le sandbox (zone E, `SPEC_MOVEMENT §13.2`) :
+> avec `WallJump_AwayVelocity = 700`, **600 uu** était le meilleur ; passé à **1000**, c'est **1000 uu**
+> qui gagne. Les deux bornes restent valables — 600 pour un couloir serré et nerveux, 1400 pour un
+> espace ouvert — mais **c'est 1000 qui sert de défaut** dans `L_W1_*`.
 
 ---
 
@@ -674,4 +690,15 @@ Cf. `Docs/11_ARBITRAGES.md D1` pour la règle complète de portée des données.
 | 2026-08-19 | `Dash_FOVReturnSpeed` (§8) | — | `8.0` | J5 : le retour du FOV après le kick avait besoin d'une vitesse d'interpolation, la clé n'existait nulle part | À CALIBRER |
 | 2026-08-19 | `Dash_GravityScale` (§8) | `0.0` | *(inchangé)* | J5 : passée **INACTIVE**. `DriveCMC` réécrit `GravityScale` chaque frame ; l'apesanteur vient de la réécriture de `Velocity` (**D31**) | INACTIVE |
 | 2026-08-19 | `Dash_ZLockOnGround` (§8) | `true` | *(inchangé)* | **Playtest J5 de Louis** : « j'aimerais un dash qui me propulse dans la direction de mon regard, pas que à l'horizontale ». Le dash suit le regard partout → clé passée **INACTIVE** (**D37**) | INACTIVE |
+| 2026-08-19 | `WallRide_DetachDotThreshold` (§9) | — | `0.7` | J6 : `SPEC_MOVEMENT §9.2` utilisait `0.7` en dur, la clé n'existait nulle part (R3) | À CALIBRER |
+| 2026-08-19 | `WallRide_DetachHoldTime` (§9) | — | `0.1` | J6 : idem, `0.1 s` en dur dans la spec | À CALIBRER |
+| 2026-08-19 | `WallRide_MissedTraceTolerance` (§9) | — | `2` | J6 : « 2 évaluations consécutives » de `§9.2` était une constante de spec, pas une clé (R3) | À CALIBRER |
+| 2026-08-19 | `WallRide_CameraTilt` (§9) | `12` | *(inchangé)* | J6 : passée EN ATTENTE (D46)… puis **câblée le jour même** sur retour de Louis (**D49**). `12°` conservé | À CALIBRER |
+| 2026-08-19 | `WallRide_MaxDuration` (§9) | `2.0` | **`0`** | **Playtest J6 de Louis** : « j'aimerais vraiment avoir un temps d'accroche sur le mur infini ». `0` désactive la sortie par durée (**D47**) | INACTIVE |
+| 2026-08-19 | `WallRide_GravityScale` (§9) | `0.25` | **`0`** | **Playtest J6** : « on perd de la verticalité trop vite… on ne descend pas petit à petit du mur ». Altitude verrouillée (**D47**) | INACTIVE |
+| 2026-08-19 | `WallRide_UpwardBoost` (§9) | `250` | **`0`** | **Playtest J6** : « quand on touche le mur on s'y attache **à l'horizontale** ». Plus de pop vertical à l'accroche (**D47**) | INACTIVE |
+| 2026-08-19 | `WallRide_SpeedRetention` (§9) | `0.98` | **`1.0`** | **Playtest J6** : « on ne gagne ni en speed ni on en perd quand on court sur le mur, on conserve exactement la même ». Vérifié : `entrySpeed == rideSpeed` au dix-millième (**D47**) | À CALIBRER |
+| 2026-08-19 | `WallJump_ZVelocity` (§9) | `800` | **`1200`** | **Playtest J6** : « le saut du mur est trop faible, il faudrait un peu plus de verticalité ». **Cause trouvée** : 800 était **sous** `Jump_ZVelocity` (900) — le wall jump sautait moins haut qu'un saut normal (**D48**) | À CALIBRER |
+| 2026-08-19 | `WallJump_AwayVelocity` (§9) | `700` | **`1000`** | **Playtest J6** : « se décoller un peu plus du mur » (**D48**) | À CALIBRER |
+| 2026-08-19 | `WallRide_CameraTiltSpeed` (§9) | — | `10` | J6 : le roulis a besoin d'une vitesse d'interpolation, la clé n'existait nulle part (**D49**) | À CALIBRER |
 | — | — | — | — | *(à remplir au prochain playtest)* | — |

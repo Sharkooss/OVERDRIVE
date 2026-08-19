@@ -754,9 +754,10 @@ IsValidWall(Hit)
 
 | Phase | Comportement |
 |---|---|
-| Accroche | `RequestState(WallRiding)` · `SetMovementMode(MOVE_Flying)` · `GravityScale = WallRide_GravityScale` · `Velocity.Z += WallRide_UpwardBoost` · roulis caméra `WallRide_CameraTilt` vers l'extérieur |
-| Maintien (par frame) | `WallDir = Cross(Hit.Normal, WorldUp)` orienté par `Dot(WallDir, HorizVel)` · `Velocity.XY = WallDir * HorizontalSpeed * WallRide_SpeedRetention^dt` · coller au mur : composante de `Velocity` le long de `-Normal` = 0 · re-trace chaque intervalle pour confirmer le mur |
-| Sortie — durée | `WallRide_MaxDuration` écoulé → `Falling`, `GravityScale` restauré |
+| Accroche | `RequestState(WallRiding)` · `SetMovementMode(MOVE_Flying)` · **`Velocity.Z = WallRide_UpwardBoost`** (valeur absolue, pas un `+=` : on s'attache **à l'horizontale**, **D47**) · roulis caméra `WallRide_CameraTilt` vers l'extérieur (**D49**) |
+| Maintien (par frame) | `WallDir = Cross(Hit.Normal, WorldUp)` orienté par `Dot(WallDir, HorizVel)` · `Velocity.XY = WallDir * RideSpeed`, avec `RideSpeed *= WallRide_SpeedRetention^dt` · `Velocity.Z += GetGravityZ × WallRide_GravityScale × dt` (le CMC n'applique **aucune** gravité en `MOVE_Flying`) · coller au mur : composante de `Velocity` le long de `-Normal` = 0 · re-trace chaque intervalle pour confirmer le mur |
+| Sortie — durée | `WallRide_MaxDuration` écoulé → `Falling`. **`MaxDuration = 0` désactive cette sortie** (accroche illimitée, **D47**) |
+| Sortie — sol | trace vers le bas de `Capsule_HalfHeight + MaxStepHeight` → `Falling` (**D45**) |
 | Sortie — plus de mur | Trace négative 2 évaluations consécutives (anti-flicker sur les joints de modules) → `Falling` |
 | Sortie — saut | `IA_Jump` → **Wall Jump** (§9.3) |
 | Sortie — input opposé | `Dot(WishDir, Hit.Normal) > 0.7` maintenu ≥ 0.1 s → décrochage volontaire, `Falling`, conserve la vitesse |
@@ -765,14 +766,81 @@ IsValidWall(Hit)
 ### 9.3 Wall Jump
 
 ```
-Velocity =  HorizVelPreserved                                  // momentum conservé
-         +  Hit.Normal              * WallJump_AwayVelocity
-         +  CameraForwardHorizontal * WallJump_ForwardBoost
-         +  WorldUp                 * WallJump_ZVelocity
-ClampVectorSize2D → Speed_HardCap ; RequestState(Jumping) ; StartGrace(MomentumDecay_GraceTime)
+                                                    // D48 — révisé au playtest J6
+camH   = normalize(CameraForward.XY)
+into   = min( Dot(camH, Hit.Normal), 0 )            // < 0 seulement si on regarde VERS le mur
+dir    = normalize( camH - Hit.Normal * into )      // regard rabattu le long du mur
+
+Velocity.XY = dir        * (RideSpeed + WallJump_ForwardBoost)
+            + Hit.Normal *  WallJump_AwayVelocity
+Velocity.Z  = WallJump_ZVelocity                     // absolu, pas un +=
+
+ClampVectorSize(XY) → Speed_HardCap ; RequestState(Jumping) ; StartGrace(MomentumDecay_GraceTime)
 ```
+
+> **D48 — le momentum part dans la direction du regard, pas le long du mur.** La formule d'origine
+> conservait `HorizVelPreserved` (donc `WallDir`) : on repartait toujours dans l'axe du mur, quoi
+> qu'on vise. Louis au playtest J6 : « se décoller un peu plus du mur **mais toujours dans la
+> direction où on regarde** ». La norme est conservée, seule la direction suit la caméra — même
+> principe que **D37** pour le dash. Le terme `min(…, 0)` est le garde-fou : si on vise le mur, la
+> composante entrante est retirée et on repart en rasant, jamais dedans.
+>
+> `WallJump_ZVelocity` était à **800**, soit **sous `Jump_ZVelocity` (900)** : le wall jump sautait
+> moins haut qu'un saut normal. C'est exactement ça, « le saut du mur est trop faible ». → **1200**.
 Le `WallRide_SameWallCooldown` s'applique aussi après un wall jump : impossible de pomper un mur unique.
 Murs opposés → alternance libre (c'est le combo recherché, cf. 07_TUNING §17 distances entre murs).
+
+### 9.4 État réel au J6 (2026-08-19) — divergences assumées
+
+`BPC_WallRide` : **45 variables, 21 fonctions**, tick **après** `BPC_MovementState`
+(`AddTickPrerequisiteComponent` depuis son propre `BeginPlay`, patron `BPC_Dash` / **D32**).
+Chaîne de sortie : `WallRideStepIfActive → WallRideStep → CheckGrounded → CheckDuration →
+CheckWallContact → ConfirmWall → CheckDetachInput`.
+
+| # | Divergence | Pourquoi |
+|---|---|---|
+| **D43** | La détection n'est **pas** un `Timer looping` mais un **accumulateur `TraceAccum` dans le Tick**, comparé à `WallRide_TraceInterval`. Fréquence identique (~33 Hz), 2 traces par évaluation, aucune trace au sol (garde `IsFalling`). | L'ordre d'exécution d'un callback de timer par rapport au tick du composant n'est pas garanti. Cette mécanique **écrit la vélocité** : elle doit s'exécuter à un point connu de la frame (le dernier). Consommer la trace dans le tick qui la produit supprime toute une famille de bugs d'ordre — celle qui a coûté 5 playtests au J5. |
+| **D44** | Le garde-fou « **Wall ride pendant Dash : refusé** » (§11) n'est **pas** la cellule `Dashing → WallRiding` de §1.3 (qui reste `oui`), mais le fait que `TryStartWallRide` ne lance la détection que si `CurrentState ∈ {Jumping, Falling}`. `CanEnterState` **n'a pas été modifiée** au J6. | Application directe de **D42** : quand la spec se contredit entre la table d'états et la matrice d'interactions, le vrai garde-fou est structurel. La cellule sert de canal, pas de verrou. |
+| **D45** | **Nouvelle condition de sortie : `Grounded`.** Trace vers le bas de `Capsule_HalfHeight + MaxStepHeight` à chaque frame de ride ; si elle touche → `EndWallRide("Grounded")`. | Découvert **en vérification headless**, pas en playtest : en `MOVE_Flying` le CMC ne détecte jamais l'atterrissage. Sans cette sortie, un ride qui descend jusqu'au sol continue à **raser le sol en vol** jusqu'à épuisement de `WallRide_MaxDuration`, joueur incontrôlable. Mesuré : sortie à `t = 1.43 s` au lieu de `2.0 s`. |
+| ~~**D46**~~ | ~~`WallRide_CameraTilt` n'est pas câblé, reporté au J14.~~ **Annulée le jour même** : Louis l'a demandé au 1ᵉʳ playtest (« un léger tilt de la caméra en roll du côté opposé au mur pour avoir une meilleure visibilité »). → **D49**. | Le tilt n'est pas du décor ici : il **change la lisibilité** quand on est collé au mur. C'est du contrôle, pas du juice. |
+| **D47** | **Le wall ride est horizontal, illimité et à vitesse strictement constante.** `MaxDuration = 0` (pas de sortie par durée) · `GravityScale = 0` (altitude verrouillée) · `UpwardBoost = 0` (accroche à plat, `Velocity.Z` mis à **0** et non `+=`) · `SpeedRetention = 1.0` (ni gain ni perte). | **Playtest J6 de Louis** : « j'aimerais vraiment ce sentiment quand on touche le mur, on s'y attache à l'horizontale dessus et on court sans gagner ni perdre de la verticalité », « un temps d'accroche infini », « on ne gagne ni en speed ni on en perd ». Le modèle « glisse lente qui s'épuise » de la spec d'origine punissait le joueur pour être resté sur le mur ; le modèle validé fait du mur **un sol vertical**. Les 4 clés restent actives : remettre `0.25` / `2.0` restaure l'ancien comportement sans toucher au Blueprint. |
+| **D48** | **Le wall jump part dans la direction du regard** (§9.3), et il monte plus haut qu'un saut normal. | Cf. §9.3. |
+| **D49** | **Roulis caméra câblé.** `UpdateCameraTilt` tourne à **chaque** tick (pas seulement pendant le ride, sinon le retour à 0 ne se ferait jamais) : `FInterpTo` vers `−WallSide × WallRide_CameraTilt` à `WallRide_CameraTiltSpeed`, appliqué via `Controller.SetControlRotation` en ne touchant **que** le `Roll`. | `bUsePawnControlRotation = true` fait que `UCameraComponent::GetCameraView` écrase la rotation monde de la caméra par la `ControlRotation` — un `SetRelativeRotation` sur la caméra est donc effacé chaque frame. La seule voie sans refactor (SpringArm, composant intermédiaire) est de poser le roulis **dans la `ControlRotation` elle-même**. Le pitch et le yaw sont relus et réécrits à l'identique : aucun input perdu. `bUseControllerRotationYaw` seul étant coché, le roulis n'affecte **pas** le mouvement. **Vérifié en PIE** : `CameraRollCurrent = 0.3699` → roulis réel de la caméra `0.3703`. Le signe se pilote par la clé : une valeur **négative** inverse le sens. |
+| — | `EndWallRide(Reason, bRestoreState)` prend un **drapeau de restitution d'état**. À `false` (perte d'état, dash, wall jump) elle remet `MOVE_Falling`, arme `SameWallCooldown` et rend la main **sans** appeler `RequestState` — sinon elle sortirait le joueur du dash qui vient de prendre l'état. | Corollaire de **D42**. |
+| — | Pendant le ride, la vitesse vit dans **`RideSpeed`** (variable du composant), pas dans `CMC.Velocity` relue chaque frame. `CMC.Velocity` n'est lue **qu'à l'entrée** (`StartWallRide`) et pour la composante Z. | Piège **6.13** : `ApplyMomentumDecay` (qui tourne avant nous) met la vélocité à l'échelle. Une mécanique qui possède la vélocité doit la posséder **exclusivement**. |
+
+### Anti-héritage de la vitesse de dash
+
+`WallRide_SpeedRetention = 1.0` **et** une accroche illimitée rendent l'exploit du J5 (D39/D41)
+catastrophique s'il existait : accrocher un mur pendant un dash figerait **5625 uu/s pour toujours**.
+Trois garde-fous, dont deux structurels :
+
+1. `TryStartWallRide` teste **`Dash.IsDashing() == false`** avant toute détection.
+2. `TryStartWallRide` n'accepte que `CurrentState ∈ {Jumping, Falling}` — donc jamais `Dashing`.
+3. `BPC_WallRide.AddTickPrerequisiteComponent(BPC_Dash)` : le wall ride tick **après** le dash, donc
+   il ne voit jamais `CMC.Velocity` en cours de dash, seulement la valeur **après** `EndDash` — qui a
+   déjà restitué la vitesse d'entrée (D30). L'ordre relatif des deux composants n'est plus indéterminé.
+
+Et dans l'autre sens, un dash **pendant** un wall ride : `WallRideStepIfActive` voit `CurrentState =
+Dashing` (pin 7 du switch) → `EndWallRide("Dash", bRestoreState = false)` → il **cesse immédiatement
+d'écrire la vélocité** et arme `SameWallCooldown`. Le dash reste seul propriétaire (piège 6.13).
+
+### Mesures PIE
+
+**2026-08-19, 1ᵉʳ jet** (zone E2) : `entrySpeed = 2517.94` (= ‖(−2500, 300)‖), `rideSpeed = 2417.46`
+après 2 s — exactement `2517.94 × 0.98²`. `WallNormal = (0,−1,0)`, `WallDir = (−1,0,0)`,
+`WallSide = −1`, `MissedTraces = 0` sur ~66 re-traces. Sorties `Duration`, `Grounded` et `NoWall`
+déclenchées et distinguées.
+
+**Après D47/D48/D49** (mêmes conditions) : `entrySpeed = rideSpeed = 2517.935662402834` — conservation
+**exacte au dix-millième**. Sortie `NoWall` après **5800 uu** parcourus, c'est-à-dire toute la longueur
+du couloir **sans jamais toucher le sol** : l'altitude est bien verrouillée (sinon `Grounded`). Durée
+du ride ≈ 2.3 s, soit **au-delà** des 2 s de l'ancien `MaxDuration` : la sortie par durée est bien
+désactivée. Roulis : `CameraRollCurrent = 0.3699` → roulis réel de la caméra `0.3703`.
+
+**Non vérifiés en headless : le wall jump (§9.3) et le décrochage volontaire** — ils exigent un input
+**pendant** le ride, que `PressKey` ne peut pas placer (piège 4.4 : un aller-retour MCP fait avancer
+~20 s de temps de jeu, et piège 4.12 : on ne peut pas ralentir PIE par outil).
 
 ---
 
@@ -923,6 +991,20 @@ SLIDE   t 0.42 / 1.20   sliding true   forced false   slope 0.50   entry 1500.00
 15° / 30° / 45°), < 0 en montée, ≈ 0 sur le plat. `forced` = capsule coincée sous un plafond.
 `entry` = `HorizontalSpeed` au moment de l'entrée en slide.
 
+**Ligne `WALLRIDE` ajoutée au J6**, clé `OD_8_WallRide`, **dessinée par `BPC_WallRide` lui-même**
+(même principe que `BPC_Slide` : il lit `MovementState.bDebugEnabled`, donc `F3` pilote les trois) :
+
+```
+WALLRIDE   riding true   t 0.42 / 2.00   side -1   spd 2417.5   miss 0   detach 0.00   samewall 3.21   end Duration
+```
+
+`side` = `+1` mur à droite, `−1` mur à gauche. `spd` = `RideSpeed`, la vitesse **possédée** par le
+composant (pas `CMC.Velocity`, cf. §9.4). `miss` = évaluations négatives consécutives, à comparer à
+`WallRide_MissedTraceTolerance`. `detach` = temps de maintien de l'input opposé. `samewall` = temps
+écoulé depuis le dernier décrochage, à comparer à `WallRide_SameWallCooldown`.
+**`end` est le chiffre à regarder en priorité** : il dit *pourquoi* le dernier ride s'est terminé —
+`Duration` · `NoWall` · `Grounded` · `Input` · `WallJump` · `Dash` · `StateLost`.
+
 ### 13.2 `L_Sandbox_Movement` (`Content/OVERDRIVE/Levels/Sandbox/`)
 
 Grille 100 uu (06_CONVENTIONS §6). Chaque zone testable **isolément**, séparée et étiquetée par un `TextRender`.
@@ -968,10 +1050,43 @@ sous `MaxStepHeight` (50).
 
 45° reste franchissable : `WalkableFloorAngle = 50°`.
 
-Zones restantes à construire (D–K) : au fur et à mesure des mécaniques (J5 dash, J6 wall ride).
+#### Zones E et F telles que construites (2026-08-19, J6)
+
+Même parti pris que B et C : `/Engine/BasicShapes/Cube`, dossiers d'outliner `Sandbox/E_CouloirsWallRide`
+et `Sandbox/F_EscalierMurs`, étiquetage par `TextRender`. **Elles occupent le demi-plan `X < 0`**, vide
+jusque-là — on sort du `PlayerStart` (origine, yaw 0), on fait demi-tour, et l'entrée est à 1000 uu.
+Les 9 murs portent le profil **`OD_WallRideSurface`** (object type `ECC_GameTraceChannel2`), vérifié
+par requête physique et non par lecture de propriété (le J1 avait relevé qu'un profil posé par outil
+n'applique pas ses réponses en mémoire : ici l'`objectType` est écrit **explicitement**).
+
+**Zone E — 3 couloirs de wall ride**, murs de `X = −7000` à `X = −1000` (6000 uu), hauteur **800 uu**,
+épaisseur 100 uu. Un couloir par écartement de `07_TUNING §17` :
+
+| Couloir | Écartement | Faces intérieures | Axe |
+|---|---|---|---|
+| E1 | **600 uu** (mini du doc) | Y = 2200 / 2800 | Y = 2500 |
+| E2 | **1000 uu** | Y = −500 / +500 | Y = 0 |
+| E3 | **1400 uu** (maxi du doc) | Y = −3200 / −1800 | Y = −2500 |
+
+**Zone F — escalier de 3 murs**, couloir de **1400 uu** autour de `Y = −6000`, murs de 1500 uu de long
+et 800 uu de haut, alternés d'un côté à l'autre, **bases en escalier** :
+
+| Mur | Côté (face intérieure) | X | Base Z |
+|---|---|---|---|
+| F1 | Y = −5300 | −3000 → −1500 | **0** |
+| F2 | Y = −6700 | −4900 → −3400 | **150** |
+| F3 | Y = −5300 | −6800 → −5300 | **300** |
+
+Trous de **400 uu** en X entre deux murs : on ne peut pas glisser de l'un à l'autre, il faut un wall
+jump. Les marches de 150 uu sont **[À CALIBRER]** — un wall jump monte de ~136 uu (`800²/2g`) plus le
+gain du ride, donc la chaîne doit passer, mais c'est le premier chiffre à revoir si Louis n'arrive pas
+à enchaîner les 3. Géométrie vérifiée par trace physique sur les 6 faces de E, les 3 faces de F et les
+3 bases.
+
+Zones restantes à construire (D, G–K) : au fur et à mesure des mécaniques.
 | D — Escaliers | Marches de 25 / 50 / 75 uu | `MaxStepHeight`, accrochage d'arête (§15) |
-| E — Couloir wall ride | 2 murs `OD_WallRideSurface` parallèles, écartements 600 / 1000 / 1400 uu (07_TUNING §17), hauteur 800 uu | Alternance de wall rides, `SameWallCooldown` |
-| F — Mur unique | 1 mur `OD_WallRideSurface` de 1600 uu, sol supprimé sur 400 uu devant | Wall ride long, durée max, wall jump |
+| ~~E — Couloir wall ride~~ | ✅ **construit au J6** (3 couloirs, cf. ci-dessus) | Alternance de wall rides, `SameWallCooldown` |
+| ~~F — Mur unique~~ | ✅ **remplacé au J6 par l'escalier de 3 murs** — c'est ce que demande la roadmap J6 et le test « enchaîner 3 murs ». Le trou de sol de 400 uu de la spec d'origine est devenu un trou **entre les murs**, le sol du sandbox étant un mesh unique | Wall ride long, durée max, wall jump |
 | G — Gouffres | Gaps de 600 / 900 / 1200 uu | Dash de franchissement, coyote time (bord marqué) |
 | H — Plafond bas + saut | Plateforme à 300 uu avec plafond bas au-dessus | Jump buffer, dé-crouch bloqué en l'air |
 | I — Piliers | 4 piliers 200×200 au milieu du couloir A | Collision frontale (>60°) |

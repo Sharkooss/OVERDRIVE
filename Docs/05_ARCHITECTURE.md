@@ -28,6 +28,24 @@ BP_PlayerCharacter  (orchestrateur)
 d'écrire un movement custom from scratch. Raison : 4 semaines, solo, Blueprint only.
 Le wall ride et le dash utilisent `MOVE_Flying` / `MOVE_Falling` + override de `Velocity`.
 
+### Ordre de tick des composants de mouvement — **état réel au J6**
+
+```
+CharacterMovementComponent          ← physique du moteur
+        ↓ AddTickPrerequisiteComponent(CMC)
+BPC_Slide                           ← écrit Velocity AVANT DriveCMC (D22)
+        ↓ AddTickPrerequisiteComponent(CMC)
+BPC_MovementState                   ← cap, décroissance, air strafe, hard clamp, DriveCMC
+        ↓ AddTickPrerequisiteComponent(MovementState)
+BPC_Dash · BPC_WallRide             ← pilotent la vélocité intégralement : dernier mot (D32, J6)
+```
+
+Chaque composant pose son prérequis **depuis son propre `BeginPlay`**, jamais depuis un autre.
+La règle qui décide du côté : **une mécanique qui possède la vélocité tick en dernier** (dash, wall
+ride) ; une mécanique qui la *module* tick avant `DriveCMC` (slide). Corollaire des pièges 6.12 et
+6.13 : un composant qui tick en dernier ne lit que des **états moteur** (`CMC.Velocity`,
+`MovementMode`), jamais les caches d'un autre composant.
+
 ---
 
 ## 2. Arbre complet
