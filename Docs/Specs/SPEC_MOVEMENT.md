@@ -73,7 +73,7 @@ Un composant qui n'obtient pas l'état **annule silencieusement** sa mécanique 
 | **Jumping** | non | non | non | non | — | oui | oui | oui |
 | **Falling** | oui | oui | oui | non³ | non⁴ | — | oui | oui |
 | **WallRiding** | non | non | non | non | oui⁵ | oui | non | oui |
-| **Dashing** | oui | oui | oui | oui | oui | oui | oui | — |
+| **Dashing** | oui | oui | oui | oui⁶ | oui | oui | oui | — |
 
 ¹ passe obligatoirement par `Walking` (le sprint exige de la vitesse).
 ² **Modifié au J4 (D23), sur décision de Louis.** La table exigeait auparavant de passer par `Sprinting`,
@@ -87,6 +87,12 @@ demande pas si la touche est cassée. Relâcher `IA_Slide` déclenche `ReleaseCr
 coyote time laisserait le joueur dans `Falling` avec une vélocité Z positive. Le double saut est bloqué
 par **`bJumpConsumed`**, pas par la table.
 ⁵ = wall jump. `Dashing` sort toujours vers l'état recalculé à partir de `MovementMode` + input, jamais vers `PreviousState` aveuglément.
+⁶ **Passée à `non` puis re-passée à `oui` au J5.** Cette cellule n'est **pas** le garde-fou de
+« Slide pendant Dash : refusé » du §11 — c'est par elle que **l'état de slide est restitué** en sortie
+de dash (D42). Le vrai garde-fou est ailleurs et il est structurel : pendant le dash, `bIsSliding`
+reste `true`, donc la garde `(au sol ET IA_Slide tenu ET NOT bIsSliding)` de `UpdateLandingBuffer` est
+fausse — **aucun nouveau slide ne peut démarrer**. Et `UpdateSlidePhysics` étant gelée pendant
+`Dashing` (D39), un slide en cours ne peut ni avancer, ni se freiner, ni sortir.
 
 ---
 
@@ -607,7 +613,15 @@ Ordre réel implémenté :
 ```
 
 `ClampToHardCap` recalcule `HorizontalSpeed` depuis la vélocité réelle, donc `DriveCMC` voit toujours
-la valeur définitive de la frame. `MaxAcceleration`, `GravityScale` et `AirControl` sont indifférents
+la valeur définitive de la frame.
+
+> ⚠️ **Corollaire, découvert au J5 (D40) : toute étape antérieure qui écrit `HorizontalSpeed` sans
+> toucher à la vélocité est un no-op.** `ClampToHardCap` l'écrase. C'est ce qui a rendu
+> `ApplyMomentumDecay` **inopérante du J2 au J5** — elle décroissait un cache que l'étape suivante
+> recalculait depuis la source. Corrigée : elle met désormais `CMC.Velocity.XY` à l'échelle.
+> **Règle : dans cette boucle de Tick, la source de vérité est la vélocité du CMC.** `HorizontalSpeed`
+> n'en est qu'une lecture, utile à l'affichage et aux comparaisons, jamais un levier.
+> Cf. `12_PIEGES_OUTILLAGE §6.14`. `MaxAcceleration`, `GravityScale` et `AirControl` sont indifférents
 à ce déplacement : le CMC les lit à sa propre frame, ils ont de toute façon une frame de retard.
 
 **Règle générale : tout ce qui écrit `CMC.Velocity` doit s'exécuter avant l'écriture de
@@ -619,30 +633,80 @@ Vérifié en PIE : 2500 uu/s injectés en vol sont intacts à l'atterrissage (`P
 
 ## 8. Dash 360° — `BPC_Dash`
 
+> **Implémenté au J5.** Ce qui suit décrit le code réel de `BPC_Dash`, pas l'intention initiale :
+> les points [3], [4] et [6] ont divergé de la première rédaction (cf. **D30** et **D31** ci-dessous).
+
 ```
-TryDash()
- [1] GARDES : Charges > 0 ET CurrentState != Dashing ET RequestState(Dashing)
- [2] DIRECTION :
-        if Length(CachedMoveInput) >= 0.05 :
-             DashDir = Normalize( YawRight * Input.X + YawForward * Input.Y )   // 360° réel
-        else :
-             DashDir = CameraForwardVector                                       // fallback caméra
-        if bIsGrounded AND Dash_ZLockOnGround : DashDir.Z = 0 ; renormaliser
- [3] CONSERVATION : EntrySpeed = Max( HorizontalSpeed * Dash_SpeedRetention, Dash_MinExitSpeed )
-        DashSpeed  = Dash_Distance / Dash_Duration
-        TargetSpeed = Max(EntrySpeed, DashSpeed)     ← un dash ne ralentit JAMAIS le joueur
- [4] EXÉCUTION : CMC.GravityScale = Dash_GravityScale ; CMC.BrakingDecelerationFalling = 0
-        Timeline de longueur Dash_Duration, courbe CF_DashVelocity (08_DATA_SCHEMAS §5)
-        chaque frame : Velocity = DashDir * TargetSpeed * CF_DashVelocity(Alpha)
-        Z verrouillé à 0 pendant toute la durée si Dash_ZLockOnGround et dash au sol
- [5] FEEDBACK : Dash_FOVKick sur BP_PlayerCameraManager, OnDashPerformed → BPC_StyleMeter
- [6] SORTIE : restaurer GravityScale = Gravity
-        HorizontalSpeed = Max(HorizontalSpeed, Dash_MinExitSpeed)
+TryDash()                                     ← appelé par IA_Dash (Triggered + Started)
+ [1] GARDES : CanDash() = bTuningCached ET NOT bIsDashing ET DashCharges > 0
+        **Le dash n'interrompt RIEN.** Il ne coupe pas le slide, ne dé-crouche pas, ne touche
+        à aucun réglage du CMC autre que les plafonds de vitesse. C'est une parenthèse (D42).
+ [2] DIRECTION — ComputeDashDir() :
+        DashDir = Normalize( ForwardVector( ControlRotation ) )       // le REGARD, pitch compris
+        L'input ZQSD n'oriente rien. Pas de Z-lock : au sol comme en l'air, on part là où on
+        regarde — viser le ciel et dasher, c'est se propulser vers le ciel. C'est **D37**.
+ [3] VITESSES : DashSpeed = Dash_Distance / Dash_Duration             // 5625 uu/s, constante
+        PreDashSpeed  = Length2D( CMC.Velocity )        ← la vélocité RÉELLE, pas HorizontalSpeed (D38)
+        PreDashDir    = Normalize2D( CMC.Velocity )     ← sert de repli si le dash est vertical
+        DashExitSpeed = Max( PreDashSpeed * Dash_SpeedRetention, Dash_MinExitSpeed )
+        ⚠ DashSpeed est la vitesse PENDANT le dash. DashExitSpeed est celle qu'on retrouve APRÈS.
+          Elles sont indépendantes — c'est D30.
+ [4] EXÉCUTION — DashStep(dt), chaque frame tant que DashTimer < Dash_Duration :
+        CMC.Velocity             = DashDir * DashSpeed   // profil constant, pas de courbe
+        CMC.MaxWalkSpeed         = DashSpeed             // sinon le CMC reclampe à la frame suivante
+        CMC.MaxWalkSpeedCrouched = DashSpeed             // accroupi, c'est CETTE clé qui clampe (§6.6)
+        Pas de GravityScale : la réécriture complète de Velocity annule déjà la gravité (D31).
+ [5] FEEDBACK : FOVKickCurrent = Dash_FOVKick, ramené à 0 par FInterpTo(Dash_FOVReturnSpeed).
+        Caméra : FieldOfView = BaseFOV + FOVKickCurrent, écrit chaque frame.
+        PlaySound2D(DashSFX) — variable Instance Editable, vide au J5.
+        Dispatcher OnDashPerformed (cible : BPC_StyleMeter au J18).
+ [6] SORTIE — EndDash() :
+        Velocity.XY = Normalize(DashDir.XY) * DashExitSpeed   ← la norme d'entrée, pas DashSpeed
+        Velocity.Z  = 0                                        ← la gravité reprend proprement
+        (dash quasi vertical → DashDir.XY ≈ 0 : on repart dans PreDashDir, sinon ActorForward.
+         On garde la hauteur gagnée ET la direction de course, on ne part pas de travers.)
         MovementState.StartGrace(MomentumDecay_GraceTime)
-        recalcul d'état depuis MovementMode + input (jamais PreviousState brut)
- [7] CHARGES : consommée à [1]. Recharge : timer Dash_Cooldown par charge, cumulable jusqu'à Dash_MaxCharges
+        RestoreStateAfterDash() :
+              si Slide.IsSliding()  → RequestState(Sliding)   ← le slide n'a jamais cessé, on lui rend l'état
+              sinon si au sol       → RequestState(Walking)
+              sinon                 → RequestState(Falling)
+ [7] CHARGES : décrémentée à [1]. ChargeTimer = Dash_Cooldown à chaque dash.
+        UpdateCharges(dt) décompte et rend une charge, se réarme tant que DashCharges < MaxCharges.
         Upgrade `DashRechargeOnKill` : décrémente le timer, ne donne pas de charge instantanée
 ```
+
+**Ordre de tick — `BPC_Dash` s'exécute APRÈS `BPC_MovementState`**, c'est-à-dire l'inverse de
+`BPC_Slide` (`§7.4`, `12_PIEGES_OUTILLAGE §6.1`). Raison : le dash doit avoir le **dernier mot** sur la
+vélocité. En ticket avant, il se ferait écraser par `ApplyAirStrafe`, `ClampToHardCap` et `DriveCMC`
+du même frame. En ticket après, il écrit lui-même `MaxWalkSpeed` (étape [4]) et **rien ne peut le
+contredire** : c'est ce qui implémente « air strafe pendant dash : désactivé » de `§11` sans toucher
+à `ApplyAirStrafe`. Prérequis posé depuis son propre `BeginPlay` : `Dash.AddTickPrerequisiteComponent(MovementState)`.
+
+**D39 — pendant le dash, personne d'autre ne touche à la vélocité.** Écrire `CMC.Velocity` la **publie**
+pour tous les composants du frame : pendant les 0.16 s, `Velocity` vaut réellement 5625 uu/s, ce n'est
+pas une valeur privée. `BPC_Slide` ticke avant le dash et **réécrivait** ce qu'il lisait —
+`CrouchStep` avec une friction de 0.6/s seulement, et `SlideStep` avec une fenêtre `Slide_HoldTime`
+qui **se réarme dès qu'elle détecte une accélération**. Les 5625 survivaient donc au dash, et
+s'entretenaient d'un dash au suivant.
+
+Garde-fou : **`BPC_Slide.UpdateSlidePhysics` est un `switch` sur `CurrentState` dont le pin `Dashing`
+n'est connecté à rien.** Ni `SlideStep` ni `CrouchStep` ne s'exécutent tant que le dash tient l'état.
+Le corps d'origine est extrait dans `SlidePhysicsStep(dt)`, appelé par les 7 autres cas.
+`UpdateForcedSlide` et `UpdateLandingBuffer` continuent de tourner : ils ne touchent pas à la vélocité.
+
+**Règle générale : une mécanique qui pilote la vélocité doit la piloter *exclusivement*.**
+Avant d'en écrire une, se demander qui d'autre lit `Velocity` ce frame-là et s'il la réécrit.
+Vaut pour `BPC_WallRide` (§9) et le bunny hop (§6). Détail : `12_PIEGES_OUTILLAGE §6.13`.
+
+**D31 — pas de `GravityScale`.** `DriveCMC` réécrit `CMC.GravityScale = Tune_Gravity` **à chaque
+frame** ; un composant qui tick avant lui ne peut rien y changer, et un composant qui tick après
+n'en a pas besoin. Comme `DashStep` réécrit le **vecteur vélocité complet** (Z compris) chaque frame,
+la gravité accumulée par le CMC est effacée avant qu'elle ne compte : l'apesanteur est obtenue
+sans toucher au réglage. `Dash_GravityScale` est donc **INACTIVE** (`07_TUNING §8`).
+
+**Pas de `CF_DashVelocity`.** La courbe de `08_DATA_SCHEMAS §5` n'existe pas encore comme asset ;
+le profil de vitesse est **constant** sur les 0.16 s. À rejuger au J14 (passe de juice) : si le dash
+paraît « mou au départ », c'est le premier levier avant de toucher `Dash_Distance`.
 
 Toutes les clés : 07_TUNING §8. `Dash_IFrames = 0` → **le dash n'esquive pas**, il repositionne (GDD §13).
 
@@ -745,14 +809,14 @@ Anti-spam : deux `Event Hit` sur le même composant à moins de 0.2 s → une se
 
 | Situation | Résolution |
 |---|---|
-| **Dash pendant Slide** | Dash accepté. Fin de slide propre (`CanUncrouch()` ; si bloqué, la capsule reste basse et le dash s'exécute quand même). Direction = input, pas la direction de slide. |
+| **Dash pendant Slide** | **D42 — le slide n'est PAS interrompu.** Il est **gelé** : `UpdateSlidePhysics` ne tourne pas pendant `Dashing` (D39), donc `HoldRemaining`, `SlideTimer` et la friction **n'avancent pas d'une frame**. `bIsSliding` reste `true`, la capsule reste accroupie, `GroundFriction` reste à 0. En sortie, `RestoreStateAfterDash` rend simplement l'état `Sliding`. Le slide reprend **exactement** où il en était, comme si le dash n'avait pas eu lieu. Direction du dash = **le regard** (D37), pas celle du slide. |
 | **Slide pendant Dash** | Refusé (`Dashing → Sliding` interdit, §1.3). L'input est bufferisé : si `IA_Slide` est encore maintenu à la fin du dash et que les gardes §4.1 passent, le slide démarre. |
 | **Slide en l'air** | Aucun slide. `SlideBufferTimestamp = Now`. À l'atterrissage, si `Now - SlideBufferTimestamp <= Jump_BufferTime` et gardes OK → slide immédiat. C'est le « slide d'atterrissage », central pour le flow. |
 | **Dash pendant Wall Ride** | Dash accepté, décroche le mur, arme `WallRide_SameWallCooldown`. Direction 360° normale. |
 | **Wall Ride pendant Dash** | Refusé pendant `Dash_Duration` (la détection est stoppée). La détection reprend à la sortie ; un mur adjacent s'accroche donc au frame suivant. |
 | **Jump pendant Slide** | Autorisé → §4.3, conserve tout le momentum. |
 | **Jump pendant Wall Ride** | = Wall Jump, §9.3. Jamais un saut normal. |
-| **Jump pendant Dash** | Refusé pendant la durée. Bufferisé via `JumpBufferedTime`, consommé à la sortie si dans `Jump_BufferTime`. |
+| **Jump pendant Dash** | Refusé pendant la durée. Bufferisé via `JumpBufferedTime`, consommé à la sortie si dans `Jump_BufferTime`. → **Implémenté au J5** : `TryJump` teste `CurrentState != Dashing` **en plus** de ses gardes existantes. Sans ce test, `DoJump` partait, sa vélocité Z était effacée par `DashStep` au frame suivant, et `RequestState(Jumping)` sortait le joueur de `Dashing` en pleine course. Le saut est maintenant simplement bufferisé, et `ConsumeBufferedJump` (qui exige d'être au sol) le consomme à la sortie d'un dash au sol — jamais en l'air, donc pas de double saut offert. |
 | **Dash pendant Jump/Falling** | Accepté. `Dash_ZLockOnGround` ne s'applique pas → dash 3D possible vers le haut/bas. |
 | **Sprint pendant Slide** | Ignoré. Le sprint reprend automatiquement à la sortie si `IA_Walk` est maintenu. |
 | **Wall Ride pendant Slide** | Impossible : le slide est un état sol, la détection murale ne tourne qu'en `Falling`. |

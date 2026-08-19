@@ -68,7 +68,7 @@ la lisibilité du niveau est une contrainte de design forte (`Docs/Specs/SPEC_LE
 | `Speed_HardCap` | 6000 | uu/s | À CALIBRER | plafond absolu, sécurité collision |
 | `Accel_Ground` | 4000 | uu/s² | À CALIBRER | montée en vitesse progressive |
 | `Accel_Air` | 4000 | uu/s² | À CALIBRER | `CMC.MaxAcceleration` en l'air. Avec `AirStrafe_AirControl`, donne l'accélération de contrôle aérien : `0.85 × 4000 = 3400 uu/s²`. **Ne pilote pas le gain de vitesse** (c'est `AirStrafe_SpeedGainPerSec`) |
-| `MomentumDecayRate` | 400 | uu/s² | À CALIBRER | perte au sol au-dessus du sprint cap |
+| `MomentumDecayRate` | 400 | uu/s² | À CALIBRER | perte au sol au-dessus du sprint cap. **Inopérante du J2 au J5** (`12_PIEGES §6.14`), réparée et **validée telle quelle par Louis au J5** — valeur conservée, jamais retunée. Repère : 3.75 s pour ramener 3000 → 1500 |
 | `MomentumDecay_GraceTime` | 0.35 | s | À CALIBRER | délai avant que la décroissance démarre |
 | `SpeedRetention_Landing` | 0.92 | ratio | À CALIBRER | vitesse conservée à l'atterrissage |
 | `SpeedRetention_Jump` | 1.0 | ratio | À CALIBRER | saut = pas de perte horizontale |
@@ -250,13 +250,33 @@ et le strafe *apprenables* plutôt qu'aléatoires.
 | `Dash_MaxCharges` | 1 | — | À CALIBRER | upgrade peut monter à 2 |
 | `Dash_SpeedRetention` | 1.0 | ratio | À CALIBRER | **conserve la vitesse horizontale (GDD §13)** |
 | `Dash_MinExitSpeed` | 1400 | uu/s | À CALIBRER | plancher de sortie |
-| `Dash_GravityScale` | 0.0 | ×G | À CALIBRER | apesanteur pendant le dash |
-| `Dash_ZLockOnGround` | true | bool | À CALIBRER | dash au sol = horizontal pur |
+| `Dash_GravityScale` | 0.0 | ×G | **INACTIVE** | l'apesanteur est obtenue en réécrivant `Velocity` chaque frame, pas via `GravityScale` (**D31**) |
+| `Dash_ZLockOnGround` | true | bool | **INACTIVE** | le dash suit le regard, pitch compris, au sol comme en l'air (**D37**, playtest J5) |
 | `Dash_FOVKick` | +12 | ° | À CALIBRER | |
+| `Dash_FOVReturnSpeed` | 8.0 | — | À CALIBRER | vitesse du `FInterpTo` qui ramène le FOV (≈ 0.3 s). Ajoutée au J5 |
 | `Dash_IFrames` | 0.0 | s | À CALIBRER | **par défaut : pas d'invincibilité** |
+
+**Valeur dérivée** (calculée au `BeginPlay`, pas une clé) :
+`DashSpeed = Dash_Distance / Dash_Duration` = **5625 uu/s**. C'est la vitesse *pendant* les 0.16 s,
+pas la vitesse de sortie.
 
 **Décision** : le dash **ne donne pas** de gros boost de vitesse (GDD §13). Il sert à réorienter,
 franchir, atteindre un mur. Si en playtest il paraît mou, augmenter `Dash_Distance` avant `SpeedRetention`.
+
+> **D30 — la vitesse de sortie n'est pas la vitesse de dash.** À la sortie, la norme repart à
+> `max(VitesseEntrée × Dash_SpeedRetention, Dash_MinExitSpeed)` — **pas** à 5625.
+> Le dash est donc une **réorientation à norme conservée** : on garde sa vitesse, on change sa
+> direction à 360°. Sans ça, `TargetSpeed = max(EntrySpeed, DashSpeed)` de `SPEC_MOVEMENT §8 [3]`
+> offrirait 5625 uu/s gratuits à chaque appui et le dash deviendrait *la* mécanique de vitesse,
+> ce que le GDD §13 interdit explicitement.
+
+> **D38 — la vitesse d'entrée se lit sur la vélocité réelle du CMC, pas sur `HorizontalSpeed`.**
+> `BPC_MovementState.HorizontalSpeed` est calculée au tick de `BPC_MovementState`, qui s'exécute
+> **avant** `BPC_Dash` (D32) : au moment où `StartDash` la lisait, elle avait **une frame de retard**.
+> En enchaînant slide et dash, la valeur mémorisée pouvait donc être celle du dash précédent —
+> et le joueur ressortait à 5625 uu/s au lieu de sa vraie vitesse, en boucle.
+> `StartDash` lit désormais `CMC.Velocity` directement. **Signalé par Louis au playtest J5** :
+> « en slidant et dashant tout le temps je suis constamment à 5625 uu/s ».
 
 ---
 
@@ -651,4 +671,7 @@ Cf. `Docs/11_ARBITRAGES.md D1` pour la règle complète de portée des données.
 | 2026-08-19 | `AirStrafe_GainAngleMax` (§7) | `45` | `60` | Élargit la fenêtre angulaire de gain : seuil `cos(150°) = −0.866` au lieu de `cos(135°) = −0.707` | À CALIBRER |
 | 2026-08-19 | `AirStrafe_AirControl` (§7) | `0.55` | `0.85` | **Playtest J3** : « aucune sensation de contrôle aérien » | À CALIBRER |
 | 2026-08-19 | `Accel_Air` (§3) | `2500` | `4000` | Idem — c'est le multiplicande de `AirControl` : `0.85 × 4000 = 3400 uu/s²` de contrôle aérien | À CALIBRER |
+| 2026-08-19 | `Dash_FOVReturnSpeed` (§8) | — | `8.0` | J5 : le retour du FOV après le kick avait besoin d'une vitesse d'interpolation, la clé n'existait nulle part | À CALIBRER |
+| 2026-08-19 | `Dash_GravityScale` (§8) | `0.0` | *(inchangé)* | J5 : passée **INACTIVE**. `DriveCMC` réécrit `GravityScale` chaque frame ; l'apesanteur vient de la réécriture de `Velocity` (**D31**) | INACTIVE |
+| 2026-08-19 | `Dash_ZLockOnGround` (§8) | `true` | *(inchangé)* | **Playtest J5 de Louis** : « j'aimerais un dash qui me propulse dans la direction de mon regard, pas que à l'horizontale ». Le dash suit le regard partout → clé passée **INACTIVE** (**D37**) | INACTIVE |
 | — | — | — | — | *(à remplir au prochain playtest)* | — |

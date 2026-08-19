@@ -185,10 +185,75 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 > Rien à rebrancher. En revanche `BPC_Slide` écrit `Velocity` : il doit s'exécuter **avant**
 > `DriveCMC` dans le Tick (`SPEC_MOVEMENT §7.4`, `12_PIEGES_OUTILLAGE §6.1`).
 
-### J5 — Dash
-- [ ] `BPC_Dash` : direction 360°, charges, cooldown, conservation de vitesse
-- [ ] Feedback provisoire (FOV kick + son placeholder)
-- [ ] **Test** : le dash sert à corriger une trajectoire, pas à aller vite
+### J5 — Dash  *(implémenté le 2026-08-19, cf. `Docs/Journal/2026-08-19_J5_Dash.md`)*
+- [x] `BPC_Dash` : direction 360°, charges, cooldown, conservation de vitesse
+      → composant **autonome** : 32 variables, 15 fonctions, `EventGraph` de 8 nœuds, 1 dispatcher
+      (`OnDashPerformed`). Zéro modification du Tick de `BPC_MovementState`, comme `BPC_Slide` (D22).
+      → **D32 — il tick APRÈS `BPC_MovementState`**, l'inverse du slide : le dash doit avoir le dernier
+      mot sur la vélocité. Il écrit lui-même `MaxWalkSpeed`, donc ni `ApplyAirStrafe` ni `ClampToHardCap`
+      ni `DriveCMC` ne peuvent le contredire — c'est ce qui implémente « air strafe pendant dash :
+      désactivé » (`SPEC_MOVEMENT §11`) **sans toucher au code validé du J3**.
+      → **D30 — le dash conserve la norme, il ne la crée pas.** On voyage à 5625 uu/s pendant 0.16 s,
+      mais on **ressort à sa vitesse d'entrée** (plancher `Dash_MinExitSpeed`). Le dash est une
+      **réorientation 360° à vitesse conservée**, pas une source de vitesse (GDD §13).
+      → **D31 — pas de `GravityScale`** : `DriveCMC` la réécrit chaque frame. L'apesanteur vient de la
+      réécriture complète du vecteur vélocité. `Dash_GravityScale` passe **INACTIVE**.
+- [x] Feedback provisoire (FOV kick + son placeholder)
+      → `Dash_FOVKick` (+12°) appliqué sur `FirstPersonCamera`, ramené par `FInterpTo` sur la nouvelle
+      clé **`Dash_FOVReturnSpeed`** (`07_TUNING §8`). Ligne `DASH` dans l'overlay `F3`.
+      → **son : câblé, asset manquant.** Variable `DashSFX` (`Instance Editable`, `SoundBase`), vide.
+      `PlaySound2D` ignore un son nul. Louis n'a qu'à déposer un asset dessus.
+- [x] **Dette J4 levée** : `Dashing → Sliding` passe à **refusé** dans `CanEnterState`
+      (1 cellule sur 64, les 63 autres vérifiées inchangées). Corrige une **contradiction** entre la
+      table `SPEC_MOVEMENT §1.3` (qui disait `oui`) et `§11` (qui dit « refusé »). La bufferisation
+      demandée n'a besoin d'aucun code : `UpdateLandingBuffer` retente déjà `TryStartSlide` chaque frame.
+- [x] **`Jump pendant Dash`** (`SPEC_MOVEMENT §11`) : `TryJump` teste `CurrentState != Dashing` et
+      bufferise. Ajouté **en insertion de nœuds** (3 nœuds, 2 recâblages), sans réécrire la fonction.
+- [x] **Refonte après le 1ᵉʳ playtest** — « l'effet est bon, la vitesse est parfaite », deux correctifs :
+      → **D37 — le dash suit le regard, point.** L'input `ZQSD` n'oriente plus rien et le Z-lock au sol
+      saute : on se propulse exactement là où on vise, ciel compris. `Dash_ZLockOnGround` → **INACTIVE**.
+      → **D38 — le slide ne récupérait plus jamais sa vraie vitesse.** `StartDash` lisait
+      `MovementState.HorizontalSpeed`, calculée au tick **précédent** (le dash tick après, D32) : en
+      enchaînant slide et dash on restait **bloqué à 5625 uu/s en permanence**. Lecture directe de
+      `CMC.Velocity`, et le slide **reprend** à la sortie avec une fenêtre `Slide_HoldTime` neuve sur la
+      vitesse restaurée — le dash **prolonge** le slide sans lui transmettre la vitesse de dash.
+      → **D39, 3ᵉ passe** : « je peux spam dash en étant crouch et je vais à 5625 constamment ».
+      D38 corrigeait ce que le dash *mémorise*, pas ce que le slide *observe*. Écrire `CMC.Velocity`
+      la **publie** : `BPC_Slide` ticke avant le dash et, dans `CrouchStep` (friction 0.6/s) comme dans
+      `SlideStep` (fenêtre qui se réarme à chaque accélération), il **lisait 5625 et le réécrivait**.
+      `UpdateSlidePhysics` devient un `switch` sur `CurrentState` dont le pin **`Dashing` n'est
+      connecté à rien**. Règle générale en `12_PIEGES §6.13`, à appliquer au wall ride (J6).
+      → **D40, 4ᵉ passe — le bug n'était pas dans le dash.** « Je peux spam dash et **revenir** à max
+      speed » : c'est le plafond qui restait haut, pas la vélocité. `ApplyMomentumDecay` écrivait la
+      **variable** `HorizontalSpeed`, que `ClampToHardCap` **recalcule depuis la vélocité réelle deux
+      étapes plus loin dans le même Tick**. La décroissance de momentum était donc **morte depuis le
+      J2**, et `DriveCMC` (`MaxWalkSpeed = max(HorizontalSpeed, cap)`) faisait que le CMC ne freinait
+      jamais : toute vitesse excédentaire était définitive. Invisible tant que rien ne poussait
+      durablement au-dessus du sprint cap — **le dash n'a pas créé le bug, il l'a révélé.**
+      La décroissance met désormais la **vélocité** à l'échelle. `12_PIEGES §6.14`.
+      ⚠️ `MomentumDecayRate` (400 uu/s²) n'a **jamais rien piloté** : à retuner en priorité.
+      → **D41, 5ᵉ passe** : « ce n'est plus un dash mais un boost ». **Mesuré** cette fois, via un
+      déclencheur headless (`F4 → IA_Dash` temporaire dans `IMC_Debug`) : `entry = exit = 2246`, le
+      dash **restaure exactement** la vitesse d'avant, il était innocent. Le coupable est le
+      **réarmement de la fenêtre** : tout redémarrage de slide pose `HoldRemaining = Slide_HoldTime`,
+      et `Dash_Cooldown` (1.4 s) à peine plus long que `Slide_HoldTime` (1.0 s) supprimait toute
+      décroissance. Le dash **sauvegarde et restitue** désormais la fenêtre : il est **neutre en temps**.
+      Au passage, `ResumeSlideIfNeeded` était morte depuis D38 (**piège 2.3b**, un `Set` avant un `if`
+      qui lit la même variable) — corrigée, et le contrôle correspondant ajouté au registre (2.3c).
+      → **D42, 6ᵉ passe — erreur d'architecture corrigée.** Le dash **coupait** le slide (`EndSlide`)
+      puis tentait de le reconstruire ; D38/D39/D41 ne faisaient que réparer les dégâts de ce cycle.
+      Le dash est désormais une **parenthèse** : le slide est **gelé** (`bIsSliding` reste `true`,
+      `HoldRemaining`/`SlideTimer` n'avancent pas, capsule et frictions intactes) et l'état lui est
+      simplement **rendu** en sortie. `CanEnterState[Dashing][Sliding]` repasse à `true` — c'est le
+      canal de restitution ; le garde-fou anti-nouveau-slide est structurel (`bIsSliding` reste vrai).
+      `DashStep` écrit aussi `MaxWalkSpeedCrouched` (piège 6.6). **Code mort supprimé** : `AbortSlide`,
+      `ResumeSlideIfNeeded` et 2 variables → 33 variables / 14 fonctions, plus simple qu'au playtest n°2.
+- [x] **Test** : le dash sert à corriger une trajectoire, pas à aller vite
+      → **validé par Louis le 2026-08-19** au 7ᵉ playtest : « tout fonctionne correctement ».
+      Le modèle a été refondu **six fois** sur son retour manche en main — direction (D37), vitesse
+      mémorisée (D38), gel du slide (D39), décroissance de momentum ressuscitée (D40), fenêtre
+      restituée (D41), puis **suppression pure et simple de l'interruption du slide (D42)**.
+      Les cinq premières passes réparaient les dégâts d'une coupure qui n'avait pas lieu d'être.
 
 ### J6 — Wall ride
 - [ ] `BPC_WallRide` : détection, accroche, maintien, wall jump, cooldown same-wall
