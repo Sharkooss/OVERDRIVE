@@ -192,6 +192,66 @@ pas été éprouvé manche en main — c'est la checklist ci-dessous, et c'est l
 
 ---
 
+## Playtest de Louis n°2 — le strafe ne dépassait jamais 1500
+
+> « le strafe ne marche pas, ça ne dépasse jamais 1500 · le air control est trop faible, aucune
+> sensation · le air gain augmente rarement et ça demande de trop bouger la souris, du coup je perds
+> tout le momentum »
+
+Trois symptômes, **un bug et un problème d'échelle**.
+
+### Le bug : `DriveCMC` s'exécutait avant l'air strafe
+
+`DriveCMC` écrit `CMC.MaxWalkSpeed = Max(CurrentSpeedCap, HorizontalSpeed)`. Placé à l'étape 6, il
+calculait ce plafond à partir de la vitesse **d'avant** le gain d'air strafe (étape 7). Le CMC, qui
+tick en premier à la frame suivante, reclampait la vélocité horizontale sur ce plafond périmé
+(`CalcVelocity` → `GetClampedToMaxSize2D`) et **effaçait le gain de la frame précédente**.
+
+Chaque frame ajoutait ~5 uu/s, chaque frame suivante les reprenait. Plafond dur à `Speed_SprintCap`,
+strafe ou pas. Ça expliquait aussi le contrôle aérien « mou » : à 1500 = `MaxWalkSpeed`, toute
+accélération latérale était reclampée en norme.
+
+Ordre corrigé — **`DriveCMC` passe en dernier**, après toute écriture de `Velocity` :
+
+```
+… DECAY → AIR_STRAFE → HARD_CLAMP → DRIVE_CMC → BROADCAST → DEBUG
+```
+
+Règle générale ajoutée à `SPEC_MOVEMENT §7.4` : elle vaudra aussi pour le dash (J5), le wall ride
+(J6) et le bunny hop (J7), qui écrivent tous `Velocity`.
+
+### Le problème d'échelle : les constantes étaient celles de Quake, pas les nôtres
+
+Quake court à `320 u/s` avec `wishspeed = 30` et `sv_airaccelerate = 10` (≈ `300 u/s²` effectifs).
+OVERDRIVE sprinte à `1500 uu/s` — un facteur **≈ 4.7**. Les valeurs de `07_TUNING §7` reprenaient les
+chiffres de Quake **sans les rééchelonner** : la fenêtre de gain était ~2,5× trop étroite et le gain
+~4× trop lent. D'où « il faut trop bouger la souris » — mathématiquement exact : avec
+`WishSpeedCap = 60` à 1500 uu/s, il fallait un `WishDir` quasi parfaitement perpendiculaire.
+
+| Clé | Avant | Après | Raisonnement |
+|---|---|---|---|
+| `AirStrafe_WishSpeedCap` | 60 | **150** | `30 × 4.7` — élargit la fenêtre de gain |
+| `AirStrafe_SpeedGainPerSec` | 300 | **1200** | `300 × 4.7 ≈ 1400`, arrondi prudent. C'est **le** clamp actif |
+| `AirStrafe_MaxAccel` | 2500 | **4000** | doit rester au-dessus du précédent, sinon il redevient le clamp |
+| `AirStrafe_GainAngleMax` | 45 | **60** | seuil `cos(150°) = −0.866` au lieu de `cos(135°) = −0.707` |
+| `AirStrafe_AirControl` | 0.55 | **0.85** | réponse au « aucune sensation de contrôle aérien » |
+| `Accel_Air` | 2500 | **4000** | multiplicande d'`AirControl` : `0.85 × 4000 = 3400 uu/s²` |
+
+**Note pour plus tard :** ces deux clés sont solidaires de `Speed_SprintCap`. Si le sprint cap bouge,
+`WishSpeedCap` et `SpeedGainPerSec` doivent bouger dans le même rapport, sinon le strafe se
+redésaccorde silencieusement. Consigné dans `07_TUNING §7`.
+
+### Vérifié en PIE
+
+2500 uu/s injectés dans la vélocité en plein vol : `PreLandSpeed = 2500` au moment du contact.
+Le momentum au-dessus du sprint cap **survit maintenant à toute la phase aérienne**.
+Avant le correctif, il était ramené à 1500 en une à deux frames.
+
+Les 6 valeurs sont bien relues par `CacheTuning` au `BeginPlay`
+(`Tune_AirStrafeGainAngleCos = −0.866` ✅).
+
+---
+
 ## ⚙️ Checklist de test manuel (R8) — Louis
 
 `L_Sandbox_Movement` en PIE. **`F3`** bascule l'overlay. La ligne à surveiller est **`JUMP`**.

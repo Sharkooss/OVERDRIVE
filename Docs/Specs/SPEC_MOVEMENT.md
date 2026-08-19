@@ -162,15 +162,20 @@ TICK(dt)
        NewSpeed = Max(CurrentSpeedCap, HorizontalSpeed - MomentumDecayRate * dt)
        SetHorizontalSpeed(NewSpeed)
     → la décroissance ne s'applique **jamais** en l'air, en slide, en dash ni en wall ride.
- 6. DRIVE_CMC :
+ 6. AIR_STRAFE : si CMC.MovementMode == Falling ET CurrentState ∉ {Dashing, WallRiding} → §7
+ 7. HARD_CLAMP : si HorizontalSpeed > Speed_HardCap → SetHorizontalSpeed(Speed_HardCap)
+ 8. DRIVE_CMC :                                    ← APRÈS toute écriture de Velocity, cf. §7.4
        CMC.MaxWalkSpeed      = Max(CurrentSpeedCap, HorizontalSpeed)   ← anti-freinage, cf. §15
        CMC.MaxAcceleration   = Accel_Ground si au sol, sinon Accel_Air
        CMC.GravityScale      = Gravity, sauf override composant (Dash/WallRide)
- 7. AIR_STRAFE : si CMC.MovementMode == Falling ET CurrentState ∉ {Dashing, WallRiding} → §7
- 8. HARD_CLAMP : si HorizontalSpeed > Speed_HardCap → SetHorizontalSpeed(Speed_HardCap)
+       CMC.AirControl        = AirStrafe_AirControl
  9. si |HorizontalSpeed - LastBroadcastSpeed| > 1.0 → OnSpeedChanged
 10. si bDebugEnabled → §13
 ```
+
+> **L'ordre 6–8 est critique** (corrigé au J3). `DriveCMC` placé avant l'air strafe calcule
+> `MaxWalkSpeed` sur la vitesse d'avant le gain ; le CMC reclampe dessus à la frame suivante et
+> le joueur reste bloqué à `Speed_SprintCap`. Détail et règle générale : **§7.4**.
 
 **Aucune écriture dans `MPC_Global` en Tick** : elle se fait dans le timer 20 Hz de §2.5.
 
@@ -404,6 +409,7 @@ exigeant, valeur haute = gain facile. Ne jamais la coder en dur ici — elle se 
 3. Écriture via **`Set Velocity`** sur le CMC (nœud `Velocity` exposé en BP), jamais `AddImpulse` ni `Launch Character` (§15).
 4. `CMC.MaxAcceleration` doit valoir au moins `AirStrafe_MaxAccel` pendant `Falling`, sinon le CMC re-clampe (§15).
 5. Ordre dans le Tick : l'air strafe passe **avant** le hard clamp (étape 8 §2.4).
+   ⚠️ **Et `DriveCMC` passe APRÈS les deux** — corrigé au J3, cf. §7.4.
 6. Vérification : en sandbox, sauter puis maintenir `Q` (strafe gauche, AZERTY — cf. D11) + tourner la souris
    lentement vers la gauche doit faire monter `SPEED` de façon continue. Si la vitesse stagne, le suspect n°1
    est `MaxAcceleration`, le n°2 est l'ordre de Tick.
@@ -423,7 +429,33 @@ Valide parce que `UMovementComponent::ConsumeInputVector()` recopie l'input dans
 avant de le vider, et que `BPC_MovementState` tick **après** le CMC (`AddTickPrerequisiteComponent`).
 
 `Tune_AirStrafeGainAngleCos` = `Cos(90 + AirStrafe_GainAngleMax)` est **précalculé au `BeginPlay`**
-(dans `CacheTuning`) : aucune trigonométrie en Tick. Vérifié en PIE : `−0.7071` pour `GainAngleMax = 45`.
+(dans `CacheTuning`) : aucune trigonométrie en Tick. Vérifié en PIE : `−0.866` pour `GainAngleMax = 60`.
+
+### 7.4 L'ordre du Tick : `DriveCMC` doit passer **après** l'air strafe (J3)
+
+L'ordre de `§2.4` (…`6. DRIVE_CMC` → `7. AIR_STRAFE` → `8. HARD_CLAMP`) est **faux** et plafonnait
+la vitesse à `Speed_SprintCap` en toutes circonstances.
+
+`DriveCMC` écrit `CMC.MaxWalkSpeed = Max(CurrentSpeedCap, HorizontalSpeed)`. Placé **avant** l'air
+strafe, il calcule ce plafond à partir de la vitesse *d'avant le gain*. Le CMC, qui tick en premier
+à la frame suivante, reclampe alors la vélocité horizontale sur ce plafond périmé
+(`CalcVelocity` → `GetClampedToMaxSize2D`) et **efface le gain de la frame précédente**.
+Le joueur ne dépasse jamais 1500 uu/s, quel que soit son strafe.
+
+Ordre réel implémenté :
+
+```
+… 5. DECAY  →  6. AIR_STRAFE  →  7. HARD_CLAMP  →  8. DRIVE_CMC  →  9. BROADCAST  →  10. DEBUG
+```
+
+`ClampToHardCap` recalcule `HorizontalSpeed` depuis la vélocité réelle, donc `DriveCMC` voit toujours
+la valeur définitive de la frame. `MaxAcceleration`, `GravityScale` et `AirControl` sont indifférents
+à ce déplacement : le CMC les lit à sa propre frame, ils ont de toute façon une frame de retard.
+
+**Règle générale : tout ce qui écrit `CMC.Velocity` doit s'exécuter avant l'écriture de
+`MaxWalkSpeed`.** Vaut aussi pour `BPC_Dash` (§8), `BPC_WallRide` (§9) et le bunny hop (§6).
+
+Vérifié en PIE : 2500 uu/s injectés en vol sont intacts à l'atterrissage (`PreLandSpeed = 2500`).
 
 ---
 
