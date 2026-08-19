@@ -54,5 +54,13 @@ desktop.ini
 !CLAUDE.md
 !.mcp.json
 
+# --- Ré-exclusions : doivent venir APRÈS les `!` ci-dessus ---
+# `!Art_Source/**` annulait les règles de sauvegarde Blender des lignes 35-37,
+# d'où deux `.blend1` déjà suivis en LFS (OD_EnvKit_City, OD_LaserPistol).
+# Ils le restent tant qu'un `git rm --cached` explicite n'est pas fait.
+Art_Source/*.blend1
+Art_Source/*.blend2
+Art_Source/*.blend[0-9]
+
 # Worktrees temporaires des tâches Claude Code
 .claude/worktrees/
