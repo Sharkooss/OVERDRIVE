@@ -72,6 +72,8 @@ la lisibilité du niveau est une contrainte de design forte (`Docs/Specs/SPEC_LE
 | `MomentumDecay_GraceTime` | 0.35 | s | À CALIBRER | délai avant que la décroissance démarre |
 | `SpeedRetention_Landing` | 0.92 | ratio | À CALIBRER | vitesse conservée à l'atterrissage |
 | `SpeedRetention_Jump` | 1.0 | ratio | À CALIBRER | saut = pas de perte horizontale |
+| `Speed_IdleThreshold` | 50 | uu/s | À CALIBRER | en dessous et sans input → état `Idle` |
+| `Input_MoveDeadZone` | 0.05 | ratio | À CALIBRER | norme mini de `IA_Move` pour compter comme un input (air strafe §7, dash §8) |
 
 **Principe** : le sprint plafonne à `Speed_SprintCap`. Au-delà, la vitesse ne s'obtient
 que par slide-boost, dash, wall ride et bunny hop, et **décroît** si le joueur ne fait plus rien.
@@ -539,4 +541,6 @@ Cf. `Docs/11_ARBITRAGES.md D1` pour la règle complète de portée des données.
 | Date | Clé | Ancien | Nouveau | Raison | Statut |
 |---|---|---|---|---|---|
 | 2026-08-18 | *(section §18)* | — | `Run_MaxLives = 3` | Arbitrage de Louis : ajout d'une condition de défaite | À CALIBRER |
+| 2026-08-18 | `Speed_IdleThreshold` (§3) | — | `50` uu/s | J2 : la résolution d'état a besoin d'un seuil `Idle`, absent de la doc | À CALIBRER |
+| 2026-08-18 | `Input_MoveDeadZone` (§3) | — | `0.05` | J2 : `SPEC_MOVEMENT §7/§8` utilisait `0.05` en dur, la clé n'existait nulle part | À CALIBRER |
 | — | — | — | — | *(à remplir dès le premier playtest)* | — |

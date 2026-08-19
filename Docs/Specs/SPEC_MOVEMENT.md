@@ -100,9 +100,18 @@ Emplacement : `Content/OVERDRIVE/Player/Components/BPC_MovementState`.
 | `LastGainAmount` / `LastGainSource` | Float / Name | ReadOnly BP | Debug | affichage debug |
 | `bIsGrounded` | Bool | ReadOnly BP | Movement | cache de `CMC.IsMovingOnGround()` |
 | `CachedCMC` | CharacterMovementComponent | — | — | résolu au `BeginPlay` (R6 §4) |
+| `CachedMoveInput` | Vector2D | ReadOnly BP | Movement | **poussé** par `BP_PlayerCharacter` (D7), jamais relu depuis Enhanced Input |
+| `bSprintHeld` | Bool | ReadOnly BP | Movement | idem, poussé par `SetSprintHeld()` |
+| `Tune_*` | Float / Bool | — | Movement\|Cached | cache des valeurs de tuning lues chaque frame (D8) |
 
 Toutes les valeurs de tuning sont lues via `MovementData`, filtrées par `BPC_PlayerStats.GetModified(<Key>)`.
 Aucun `Get` de `DA_Movement_Default` en Tick : cacher la struct au `BeginPlay`, re-cacher sur `OnUpgradesApplied`.
+
+> **D7 (J2)** — « `BPC_MovementState` ne connaît pas les inputs » (§1.1) s'applique à **Enhanced Input**,
+> pas à la donnée. Le composant n'ouvre aucun `IA_*` : c'est `BP_PlayerCharacter` qui appelle
+> `SetMoveInput(Vector2D)` et `SetSprintHeld(bool)` à chaque événement d'input. Le composant reçoit,
+> il ne va pas chercher. `CachedMoveInput` existe des deux côtés (le character en a besoin pour la
+> direction de dash, §8).
 
 ### 2.2 Fonctions publiques
 
@@ -117,6 +126,9 @@ Aucun `Get` de `DA_Movement_Default` en Tick : cacher la struct au `BeginPlay`, 
 | `ApplySpeedPenaltyPercent(Percent, Reason)` | fonction | Multiplie la vélocité horizontale par `(1 - Percent)`, arme `SpeedLoss_RecoveryGrace`, fire `OnSpeedPenaltyApplied` (`11_ARBITRAGES D11 / D12`) |
 | `SetHorizontalSpeed(NewSpeed)` | fonction | Conserve la direction, écrit `CMC.Velocity`. **Point d'entrée unique** des composants |
 | `SetSpeedCapOverride(NewCap, Duration)` | fonction | Cap temporaire (dash, wall ride) ; `Duration = 0` → permanent jusqu'à `ClearSpeedCapOverride()` |
+| `SetMoveInput(MoveInput: Vector2D)` | fonction | Appelée par `BP_PlayerCharacter` sur `IA_Move` (Triggered **et** Completed → zéro). Cf. D7 |
+| `SetSprintHeld(bHeld: bool)` | fonction | Appelée par `BP_PlayerCharacter` sur `IA_Sprint` Started / Completed. Cf. D7 |
+| `ToggleDebug()` | fonction | Bascule `bDebugEnabled` (F1, `IA_DebugToggle`) |
 | `StartGrace(Duration)` | fonction | Arme `GraceTimeRemaining = Duration` (typiquement `MomentumDecay_GraceTime`) : suspend la décroissance §2.4-5. Appelée par `BPC_Dash` (§8), `BPC_WallRide` (§9.3) et les pénalités §10.2 |
 | `IsGrounded() → bool` | pure | |
 

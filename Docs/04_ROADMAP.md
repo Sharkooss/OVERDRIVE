@@ -28,14 +28,20 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 
 ### J1 — Fondations ✅ (2026-08-18, cf. `Docs/Journal/2026-08-18_J1_Fondations.md`)
 - [x] Supprimer `Content/FirstPerson`, `Content/Characters`, `Content/LevelPrototyping` (garder `Input/` et les matériaux de grid le temps du blockout)
-      → `LevelPrototyping/Materials|Textures|Meshes` conservés, seul `Interactable/` supprimé (décision D1 du journal, **à valider**)
+      → `LevelPrototyping/Materials|Textures|Meshes` conservés, seul `Interactable/` supprimé.
+      **D1 validée par Louis le 2026-08-18** : le reste de `LevelPrototyping/` est supprimé **après le J4**
+      (les meshes servent aux pentes du slide).
+      → `Content/Input/` **supprimé au J2** (9 assets : 4 `IA_*`, 2 `IMC_*`, 3 assets tactiles) :
+      doublons de nom avec `OVERDRIVE/Player/Input/`, l'éditeur se liait au mauvais asset.
+      Zéro référence entrante. Cf. journal J2 D9.
 - [x] Créer `GM_Overdrive`, `GS_Overdrive`, `PC_Overdrive`, `GI_Overdrive`, `PS_Overdrive`
 - [x] Créer `BP_PlayerCharacter` (capsule, caméra, bras FP placeholder)
 - [x] Configurer les canaux de collision et presets (`Docs/06_CONVENTIONS.md §7`)
-- [!] Créer tous les Enums (`Docs/08_DATA_SCHEMAS.md §1`)
-      → **13 assets créés mais VIDES.** Aucun outil (52 toolsets MCP + API Python UE)
-      ne sait écrire les entrées d'un `UserDefinedEnum`. **Saisie manuelle requise
-      avant le J2** — liste ordonnée dans `08_DATA_SCHEMAS §1`
+- [x] Créer tous les Enums (`Docs/08_DATA_SCHEMAS.md §1`)
+      → Assets créés par outil, **entrées saisies à la main par Louis** : aucun outil
+      (52 toolsets MCP + API Python UE) ne sait écrire les entrées d'un `UserDefinedEnum`.
+      `E_MovementState` / `E_HeatState` / `E_Rank` au J1, **les 10 autres au J2**.
+      **Les 13 sont complets et conformes à `08_DATA_SCHEMAS §1`** (vérifié entrée par entrée)
 - [x] Créer `IMC_Gameplay` + toutes les `IA_*` (`Docs/09_INPUT.md`)
 - [x] Créer `L_Sandbox_Movement` vide avec un sol de 20000 uu
 - [x] Réglages projet : DefaultMap, GameMode, gravité, `MaxStepHeight`
@@ -47,14 +53,26 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 - [x] `PDA_MovementData` + `DA_Movement_Default` (toutes les valeurs de `Docs/07_TUNING.md`)
       → 70 propriétés `Instance Editable`, miroir de `07_TUNING §2–§10`.
       `MaxHealth` exclu volontairement : il appartient à `BPC_Health` (`05_ARCHITECTURE`)
-- [ ] `BPC_MovementState` : machine à états, vitesse interne, momentum, décroissance
-- [ ] Sprint
-- [ ] Overlay debug à l'écran : état, vitesse, cooldowns
+- [x] `BPC_MovementState` : machine à états, vitesse interne, momentum, décroissance
+      → 34 variables, 6 dispatchers, 24 fonctions, boucle de Tick complète
+      (grounded → **résolution d'état** → cap → grace → décroissance → pilotage CMC →
+      hard clamp → broadcast → debug), `CacheTuning` au `BeginPlay`,
+      `AddTickPrerequisiteComponent(CMC)`.
+      → Machine à états : table `§1.3` complète en `Switch on E_MovementState` imbriqué,
+      `RequestState` / `CanEnterState` / `GetCurrentState` / `ResolveState`.
+      Les 6 éléments typés enum ont été **créés à la main par Louis** (aucun outil MCP ne
+      sait le faire, cf. journal J2).
+      → La décroissance est gardée par l'état `{Idle, Walking, Sprinting}` (`IsDecayAllowedState`)
+- [x] Sprint — rampe `Speed_Walk → Speed_SprintCap` en `Sprint_TimeToMax` (`FInterpTo Constant`),
+      garde `Sprint_RequiresForwardInput`, cap figé en l'air (`SPEC_MOVEMENT §3`)
+- [x] Overlay debug à l'écran : état, vitesse, cap, grace, sol, dernier gain, état du CMC
+- [x] Câblage input `BP_PlayerCharacter` (hors J2 à l'origine, mais rien n'est testable sans) :
+      `IA_Move`, `IA_Look`, `IA_Sprint`, `IA_DebugToggle` + `AddMappingContext` au `BeginPlay`
 - [ ] **Test** : le sprint plafonne bien à `Speed_SprintCap`
 
-> **Prérequis enums** : `E_MovementState` et `E_HeatState` sont remplis et vérifiés.
-> Les 10 autres enums de `08_DATA_SCHEMAS §1` sont encore vides — ils ne bloquent rien
-> avant le J8, saisie manuelle par Louis (aucun outil ne sait le faire).
+> **Prérequis enums : levé.** Les **13 enums** de `08_DATA_SCHEMAS §1` sont remplis et vérifiés
+> entrée par entrée (les 10 derniers saisis par Louis au J2). Plus rien ne bloque côté données
+> jusqu'aux Structs du J10.
 
 ### J3 — Saut & air control
 - [ ] Jump + coyote time + jump buffer
@@ -67,6 +85,7 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 - [ ] Enchaînements `Sprint → Slide` et `Sprint → Slide → Jump`
 - [ ] Zone de test pentes + plafond bas dans le sandbox
 - [ ] **Test** : le slide donne envie d'être enchaîné, jamais subi
+- [ ] **Après le J4** : supprimer `Content/LevelPrototyping/` (décision D1, validée le 2026-08-18)
 
 ### J5 — Dash
 - [ ] `BPC_Dash` : direction 360°, charges, cooldown, conservation de vitesse

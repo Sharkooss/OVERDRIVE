@@ -46,6 +46,12 @@ pas par type. (`Enemies/Grunt/` contient le BP, le mesh, l'anim et le matériau 
 | `CF_` | Curve Float | `CF_FOVBySpeed` |
 | `CV_` | Curve Vector | `CV_DashProfile` |
 
+**Variables de cache de tuning** : une valeur d'un `DA_*` recopiée au `BeginPlay` pour éviter un
+`Get` par frame se nomme **`Tune_<Clé>`** et vit dans la catégorie `<Système>|Cached`
+(ex. `Tune_SpeedSprintCap` ← `DA_Movement_Default.Speed_SprintCap`). Elles sont remplies par une
+fonction `CacheTuning()` — c'est le seul point à rappeler quand `BPC_PlayerStats` applique un
+upgrade. *(Décision D8, J2 — `T_` était déjà pris par les textures.)*
+
 ### Art
 | Préfixe | Type | Exemple |
 |---|---|---|

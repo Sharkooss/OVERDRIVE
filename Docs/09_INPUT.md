@@ -7,27 +7,35 @@
 
 ## 1. Mapping de référence
 
+> **Clavier de référence : AZERTY** (décidé au J2, sur playtest). UE mappe les touches par
+> **caractère produit**, pas par position physique : un mapping `W A S D` disperse les touches
+> sur un clavier français. Le mapping de référence est donc `Z Q S D`. Le support QWERTY passera
+> par le rebinding (backlog post-v1, `03_SCOPE_LOCK`).
+
 | Touche | Action | Input Action | Type de valeur | Trigger |
 |---|---|---|---|---|
-| `W A S D` | Déplacement | `IA_Move` | Axis2D | Down |
+| `Z Q S D` | Déplacement | `IA_Move` | Axis2D | Down |
 | `Souris` | Visée | `IA_Look` | Axis2D | Down |
 | `LMB` | Laser | `IA_Fire` | Digital | **Pressed** (semi-auto, jamais Hold) |
 | `RMB` | Melee | `IA_Melee` | Digital | Pressed |
 | `Espace` | Saut | `IA_Jump` | Digital | Pressed + Released |
 | `Maj gauche` | Sprint | `IA_Sprint` | Digital | Hold (option Toggle dans Settings) |
 | `Ctrl gauche` | Slide | `IA_Slide` | Digital | Hold |
-| `Souris 4` / `Q` | Dash | `IA_Dash` | Digital | Pressed |
+| `Souris 4` / `A` | Dash | `IA_Dash` | Digital | Pressed |
 | `R` | Restart rapide | `IA_Restart` | Digital | Hold 0.4 s |
 | `Échap` | Pause | `IA_Pause` | Digital | Pressed |
-| `F1` | Debug overlay | `IA_DebugToggle` | Digital | Pressed |
+| `F5` | Debug overlay | `IA_DebugToggle` | Digital | Pressed |
 
-**Décision** : `Souris 4` **et** `Q` sont mappés sur `IA_Dash` simultanément.
+**Décision** : `Souris 4` **et** `A` sont mappés sur `IA_Dash` simultanément.
 Enhanced Input le permet nativement ; ça couvre les souris sans boutons latéraux sans coûter un réglage.
+`A` est la touche immédiatement à gauche du bloc de déplacement en AZERTY (c'était `Q` du temps du mapping QWERTY).
 
 **`E` n'est pas mappé** : réservé à une éventuelle interaction future, laissé libre.
 
 **Nommage** : l'action de debug s'appelle **`IA_DebugToggle`** (verbe en second, comme `IA_Restart`),
-sur **`F1`**, dans `IMC_Debug` — cf. `11_ARBITRAGES D15`. `IA_ToggleDebug` n'existe pas.
+sur **`F5`**, dans `IMC_Debug` — cf. `11_ARBITRAGES D15`. `IA_ToggleDebug` n'existe pas.
+**Pas `F1`** : c'est le raccourci Wireframe du viewport éditeur, il basculait le rendu en fil de fer
+à chaque appui pendant le PIE.
 
 ---
 
@@ -52,7 +60,7 @@ On ne se contente jamais de `Set Input Mode`.
 - Pas de Dead Zone (souris)
 
 ### `IA_Move`
-- Modificateur : `Swizzle Input Axis Values` (`YXZ`) pour mapper W/S sur Y
+- Modificateur : `Swizzle Input Axis Values` (`YXZ`) pour mapper Z/S sur Y
 - Pas de `Normalize` : la normalisation se fait dans `BPC_MovementState`, car l'air strafe
   a besoin du vecteur d'input brut (`WishDir`)
 
