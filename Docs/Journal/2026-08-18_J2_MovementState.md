@@ -76,9 +76,13 @@ Toggle par `IA_DebugToggle` (F1). **La ligne `STATE` manque** (dépend de l'enum
   Manquent donc : `CurrentState`, `PreviousState`, `RequestState`, `CanEnterState`,
   `GetCurrentState`, `ResolveState`, et la ligne `STATE` de l'overlay.
   → **Saisie manuelle par Louis**, liste exacte en fin de fichier. Je remplis la logique ensuite.
-- **Gate de décroissance sur l'état** (`SPEC_MOVEMENT §2.4-5` : `CurrentState ∈ {Idle, Walking, Sprinting}`).
-  Aujourd'hui la garde est `bIsGrounded` seule — strictement équivalente tant que `BPC_Slide`
-  n'existe pas (J4). **À rebrancher au J4**, sinon le slide sera rongé par la décroissance.
+- ~~**Gate de décroissance sur l'état**~~ — ⚠️ **note périmée, corrigée le 2026-08-19.**
+  Cette ligne a été écrite en cours de J2, avant la finalisation de la machine à états le soir même.
+  `IsDecayAllowedState()` existe bel et bien et retourne `true` uniquement pour
+  `{Idle, Walking, Sprinting}`, `false` pour `{Sliding, Jumping, Falling, WallRiding, Dashing}` ;
+  `ApplyMomentumDecay` l'utilise déjà en garde, avec `bIsGrounded` **et** `GraceTimeRemaining <= 0`.
+  **Rien à rebrancher au J4** : le slide ne sera pas rongé par la décroissance.
+  *(Vérifié en relisant le graphe, pas en relisant cette note — cf. `12_PIEGES_OUTILLAGE §1.1`.)*
 - **Timer 20 Hz `MPC_Global.PlayerSpeed01`** (`SPEC_MOVEMENT §2.5`) : `MPC_Global` n'existe pas
   avant le J14, et les clés `SpeedLines_StartSpeed` / `_FullSpeed` ne sont pas dans le DataAsset.
 - **Jump / coyote / buffer** : c'est le J3, pas le J2. Sans saut, seuls le sprint, la marche et

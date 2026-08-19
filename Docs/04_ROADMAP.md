@@ -112,9 +112,19 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 ### J4 — Slide
 - [ ] `BPC_Slide` : entrée, resize capsule, `CanUncrouch()`, friction, boost, pentes, timer
 - [ ] Enchaînements `Sprint → Slide` et `Sprint → Slide → Jump`
-- [ ] Zone de test pentes + plafond bas dans le sandbox
+- [x] **Zone de test pentes + plafond bas dans le sandbox** — *fait en amont le 2026-08-19*
+      → Zone B (tunnel 4000 × 1000, intérieur **130 uu**) et Zone C (rampes 15/30/45°, pente 1600 uu,
+      chacune vers un plateau). Géométrie vérifiée par trace physique. Détail : `SPEC_MOVEMENT §13.2`.
 - [ ] **Test** : le slide donne envie d'être enchaîné, jamais subi
 - [ ] **Après le J4** : supprimer `Content/LevelPrototyping/` (décision D1, validée le 2026-08-18)
+      → **audit fait le 2026-08-19 : 16 assets, _zéro référence externe_.** La suppression est sans
+      risque. Le sandbox du J4 a été construit en `/Engine/BasicShapes/Cube` exprès pour ne pas
+      recréer de dépendance. D1 peut être exécutée dès que Louis le dit.
+
+> **Dette du J3 levée en amont** : la garde de décroissance sur l'état (`IsDecayAllowedState`) était
+> annoncée manquante par le journal J2 — elle existait déjà et fonctionne. Note corrigée.
+> Rien à rebrancher. En revanche `BPC_Slide` écrit `Velocity` : il doit s'exécuter **avant**
+> `DriveCMC` dans le Tick (`SPEC_MOVEMENT §7.4`, `12_PIEGES_OUTILLAGE §6.1`).
 
 ### J5 — Dash
 - [ ] `BPC_Dash` : direction 360°, charges, cooldown, conservation de vitesse

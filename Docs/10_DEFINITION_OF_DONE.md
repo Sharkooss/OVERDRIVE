@@ -45,8 +45,8 @@ Supprimer une feature qui ne fonctionne pas n'est pas un échec, c'est la métho
 
 | # | Test | Quand | Réponse | Date |
 |---|---|---|---|---|
-| **1** | Le joueur joue 5 minutes sans aucun contenu. Le mouvement est-il amusant ? | Gate S1 | | |
-| **2** | Peut-il atteindre une vitesse élevée en maîtrisant plusieurs mécaniques ? | Gate S1 | | |
+| **1** | Le joueur joue 5 minutes sans aucun contenu. Le mouvement est-il amusant ? | Gate S1 | ✅ **OUI** — 5 min jouées par Louis, « sans souci », avec sprint + saut + air strafe seuls | 2026-08-19 (J3) |
+| **2** | Peut-il atteindre une vitesse élevée en maîtrisant plusieurs mécaniques ? | Gate S1 | ⏳ partiel — l'air strafe passe le sprint cap (2121 uu/s en diagonale). À rejuger au J7 avec slide + dash + wall ride | — |
 | **3** | Est-il plus intéressant de tuer un ennemi en mouvement que de s'arrêter ? | Gate S2 | | |
 | **4** | Un headshot procure-t-il une vraie satisfaction ? | Gate S2 | | |
 | **5** | Un impact ennemi fait-il réellement *ressentir* une erreur ? | Gate S2 | | |

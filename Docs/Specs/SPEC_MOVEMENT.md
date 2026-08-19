@@ -681,11 +681,48 @@ Les lignes `BHOP` / `DASH` / `SLIDE` / `WALLRIDE` arrivent avec leurs composants
 
 Grille 100 uu (06_CONVENTIONS §6). Chaque zone testable **isolément**, séparée et étiquetée par un `TextRender`.
 
-| Zone | Construction | Ce qu'elle teste |
+| Zone | Construction | Ce qu'elle teste | État |
+|---|---|---|---|
+| A — Ligne droite | Couloir plat 8000 uu, largeur 800 uu, marques au sol tous les 1000 uu | Sprint cap, décroissance, lecture de vitesse | le sol plat de 20000 uu suffit pour l'instant |
+| B — Tunnel bas | Tunnel de 20000 uu de long, hauteur intérieure **inférieure à `CapsuleHalfHeight × 2`** et supérieure à `CapsuleHalfHeight_Slide × 2` | Slide sous obstacle + **dé-crouch bloqué** (§4.2) | ✅ **construit au J3** |
+| C — Rampes | Rampes descendantes 15° / 30° / 45° et montantes idem, longueur 1600 uu | `Slide_SlopeAccelBonus`, extinction en montée | ✅ **construit au J3** |
+
+#### Zones B et C telles que construites (2026-08-19)
+
+Toute la géométrie est en `/Engine/BasicShapes/Cube` — **volontairement pas en `LevelPrototyping`**,
+qui est promis à la suppression (décision D1). Rangée dans l'outliner sous `Sandbox/B_TunnelBas`
+et `Sandbox/C_Rampes`, étiquetée par des `TextRender`.
+
+**Zone B — tunnel bas**, à `Y = −3000`, de `X = 1000` à `X = 5000` :
+
+| Mesure | Valeur | Contrainte |
 |---|---|---|
-| A — Ligne droite | Couloir plat 8000 uu, largeur 800 uu, marques au sol tous les 1000 uu | Sprint cap, décroissance, lecture de vitesse |
-| B — Tunnel bas | Tunnel de 20000 uu de long, hauteur intérieure **inférieure à `CapsuleHalfHeight × 2`** et supérieure à `CapsuleHalfHeight_Slide × 2` | Slide sous obstacle + **dé-crouch bloqué** (§4.2) |
-| C — Rampes | Rampes descendantes 15° / 30° / 45° et montantes idem, longueur 1600 uu | `Slide_SlopeAccelBonus`, extinction en montée |
+| Hauteur intérieure | **130 uu** | `> 88` (`CapsuleHalfHeight_Slide × 2`) et `< 176` (`CapsuleHalfHeight × 2`) ✅ |
+| Longueur | **4000 uu** | doit dépasser la distance d'un slide (~2400 uu à `Slide_MaxDuration = 1.2 s`) pour que le dé-crouch bloqué se produise |
+| Largeur intérieure | 1000 uu | — |
+
+> **Divergence assumée** : la spec dit 20000 uu. À cette longueur le tunnel demanderait 13 s de
+> traversée accroupie et deviendrait inutilisable. 4000 uu suffisent à garantir qu'un seul slide ne
+> le franchit pas — c'est la seule propriété dont dépend le test. Vérifié par trace physique :
+> plafond à 130.0 uu sur les 5 points de contrôle.
+
+**Zone C — rampes**, longueur de pente 1600 uu, largeur 800 uu, départ `X = 1500` :
+
+| Angle | Y | Hauteur atteinte | Emprise au sol | Plateau (face sup.) |
+|---|---|---|---|---|
+| 15° | 2000 | 414 uu | 1546 uu | 438.3 uu |
+| 30° | 3200 | 800 uu | 1386 uu | 821.7 uu |
+| 45° | 4400 | 1131 uu | 1131 uu | 1149.0 uu |
+
+Chaque rampe monte vers un plateau de 1200 × 800 uu : on la monte en sprint, on fait demi-tour, on
+la redescend en slide. Ça teste `Slide_SlopeAccelBonus` **et** l'extinction en montée avec la même
+géométrie. Le raccord rampe/plateau est calé sur la **face supérieure** de la rampe, pas sur son axe
+— sinon une lèvre de ~24 uu accrocherait le slide. La marche à l'entrée de chaque rampe fait 18–24 uu,
+sous `MaxStepHeight` (50).
+
+45° reste franchissable : `WalkableFloorAngle = 50°`.
+
+Zones restantes à construire (D–K) : au fur et à mesure des mécaniques (J5 dash, J6 wall ride).
 | D — Escaliers | Marches de 25 / 50 / 75 uu | `MaxStepHeight`, accrochage d'arête (§15) |
 | E — Couloir wall ride | 2 murs `OD_WallRideSurface` parallèles, écartements 600 / 1000 / 1400 uu (07_TUNING §17), hauteur 800 uu | Alternance de wall rides, `SameWallCooldown` |
 | F — Mur unique | 1 mur `OD_WallRideSurface` de 1600 uu, sol supprimé sur 400 uu devant | Wall ride long, durée max, wall jump |
