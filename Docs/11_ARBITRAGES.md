@@ -214,7 +214,7 @@ Mettre à jour `05_ARCHITECTURE §2`.
 | D12 | Dispatcher de pénalité | **`OnSpeedPenaltyApplied(OldSpeed, NewSpeed, Percent, Reason)`** |
 | D13 | Stat limitante (écran de résultats) | Fonction **`GetLimitingStat()`**, ordre de départage **TIME > KILLS > STYLE > SPEED** |
 | D14 | Vitesse comparée au S Rank | **`AverageSpeed`** (c'est elle qui alimente `ScoreSpeed`). Ajouter `TargetAverageSpeed` à `S_RankThresholds` |
-| D15 | Toggle debug | **`IA_DebugToggle`** sur **`F5`** — *révisé au J2 : `F1` est le raccourci Wireframe du viewport éditeur (codé en dur, pas dans un `.ini`), il basculait le rendu en fil de fer à chaque appui. `F5` n'a aucun binding viewport par défaut, vérifié en PIE.* |
+| D15 | Toggle debug | **`IA_DebugToggle`** sur **`F3`** — *révisé au J2 : `F1` est le raccourci Wireframe du viewport éditeur (codé en dur, pas dans un `.ini`), il basculait le rendu en fil de fer à chaque appui. `F3` choisi par Louis, atteinte du jeu vérifiée en PIE. Repli si le viewport réagit aussi : `F5` ou `F6`, tous deux testés libres.* |
 | D16 | Restart | **`Hold 0.4 s`**, cible technique **< 0.5 s** entre mort et jouable |
 | D17 | Raretés au coffre | Couleurs de `PALETTE.md §5` (Common gris, Rare bleu `#3AA8FF`, Epic violet `#B14BFF`) — **pas** de couleur réservée au gameplay |
 | D18 | Lettre de rank | Une couleur par rang (`OD_Rank_D..S`), pas magenta systématique |

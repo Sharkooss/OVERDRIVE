@@ -68,7 +68,9 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 - [x] Overlay debug à l'écran : état, vitesse, cap, grace, sol, dernier gain, état du CMC
 - [x] Câblage input `BP_PlayerCharacter` (hors J2 à l'origine, mais rien n'est testable sans) :
       `IA_Move`, `IA_Look`, `IA_Sprint`, `IA_DebugToggle` + `AddMappingContext` au `BeginPlay`
-- [ ] **Test** : le sprint plafonne bien à `Speed_SprintCap`
+- [x] **Test** : le sprint plafonne bien à `Speed_SprintCap`
+      → validé par Louis le 2026-08-19 : marche 1000, sprint 1500, **sans à-coup**,
+      pas de sprint en marche arrière, cap qui redescend au relâchement. Aucune valeur retunée.
 
 > **Prérequis enums : levé.** Les **13 enums** de `08_DATA_SCHEMAS §1` sont remplis et vérifiés
 > entrée par entrée (les 10 derniers saisis par Louis au J2). Plus rien ne bloque côté données

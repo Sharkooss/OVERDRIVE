@@ -24,7 +24,7 @@
 | `Souris 4` / `A` | Dash | `IA_Dash` | Digital | Pressed |
 | `R` | Restart rapide | `IA_Restart` | Digital | Hold 0.4 s |
 | `Échap` | Pause | `IA_Pause` | Digital | Pressed |
-| `F5` | Debug overlay | `IA_DebugToggle` | Digital | Pressed |
+| `F3` | Debug overlay | `IA_DebugToggle` | Digital | Pressed |
 
 **Décision** : `Souris 4` **et** `A` sont mappés sur `IA_Dash` simultanément.
 Enhanced Input le permet nativement ; ça couvre les souris sans boutons latéraux sans coûter un réglage.
@@ -33,9 +33,10 @@ Enhanced Input le permet nativement ; ça couvre les souris sans boutons latéra
 **`E` n'est pas mappé** : réservé à une éventuelle interaction future, laissé libre.
 
 **Nommage** : l'action de debug s'appelle **`IA_DebugToggle`** (verbe en second, comme `IA_Restart`),
-sur **`F5`**, dans `IMC_Debug` — cf. `11_ARBITRAGES D15`. `IA_ToggleDebug` n'existe pas.
+sur **`F3`**, dans `IMC_Debug` — cf. `11_ARBITRAGES D15`. `IA_ToggleDebug` n'existe pas.
 **Pas `F1`** : c'est le raccourci Wireframe du viewport éditeur, il basculait le rendu en fil de fer
-à chaque appui pendant le PIE.
+à chaque appui pendant le PIE. `F3` atteint bien le jeu (vérifié en PIE) ; si le viewport éditeur
+réagit lui aussi (bloc F1–F4 = modes d'affichage), `F5` et `F6` sont libres et testés.
 
 ---
 
