@@ -77,6 +77,9 @@ Un composant qui n'obtient pas l'état **annule silencieusement** sa mécanique 
 
 ¹ passe obligatoirement par `Walking` (le sprint exige de la vitesse). ² il faut d'abord atteindre `Slide_MinEntrySpeed` → `Sprinting`.
 ³ le slide en l'air est **bufferisé**, pas exécuté (cf. §11). ⁴ le double saut n'existe pas (`Jump_MaxCount`), sauf coyote time.
+→ **Implémenté au J3 :** `Falling → Jumping` est **autorisé** dans `CanEnterState`, sinon un saut en
+coyote time laisserait le joueur dans `Falling` avec une vélocité Z positive. Le double saut est bloqué
+par **`bJumpConsumed`**, pas par la table.
 ⁵ = wall jump. `Dashing` sort toujours vers l'état recalculé à partir de `MovementMode` + input, jamais vers `PreviousState` aveuglément.
 
 ---
@@ -315,6 +318,16 @@ OnLanded(Hit)                                                      ← Event Lan
 `Jump_MaxCount = 1` (07_TUNING §6) : `CMC.JumpMaxCount = 1`, le double saut est remplacé par le dash.
 `CMC.bApplyGravityWhileJumping = true`, `AirControl` = `AirStrafe_AirControl` (§7).
 
+### 5.1 Écarts d'implémentation (J3, 2026-08-19)
+
+| Point | Spec ci-dessus | Implémenté | Pourquoi |
+|---|---|---|---|
+| `bJumpConsumed = true` / `JumpBufferedTime = -1` | dans `TryJump()` | dans **`DoJump()`** | `DoJump` est aussi appelé depuis `HandleLanded` (saut bufferisé). Placé dans `TryJump`, le saut bufferisé laissait `bJumpConsumed = false` et ouvrait un double saut par coyote time. |
+| `OnLanded(Hit)` | événement du Character | fonction **`HandleLanded()`** du composant, relayée par `Event On Landed` de `BP_PlayerCharacter` | le composant ne peut pas recevoir l'événement ; le character se contente de relayer, il ne contient aucune logique (`§1.1`). |
+| — | *(rien)* | `HandleLanded` appelle **`StartGrace(MomentumDecay_GraceTime)`** | **D13.** Sans ça, la décroissance §2.4-5 attaque le momentum dès la frame de contact et `SpeedRetention_Landing` ne se voit jamais. Le bunny hop du J7 en dépend. |
+| `LastGroundedTime` | « écrit chaque frame où `bIsGrounded` » | fonction **`UpdateJumpTimers()`**, étape 1bis du Tick | isolé pour rester lisible. |
+| `JumpBufferedTime` initial | *(non précisé)* | **`-1`** au `BeginPlay` | sinon `Now - 0 < Jump_BufferTime` est vrai pendant les 0,15 premières secondes de jeu et déclenche un saut fantôme au premier contact du sol. |
+
 ---
 
 ## 6. Bunny hop
@@ -391,8 +404,26 @@ exigeant, valeur haute = gain facile. Ne jamais la coder en dur ici — elle se 
 3. Écriture via **`Set Velocity`** sur le CMC (nœud `Velocity` exposé en BP), jamais `AddImpulse` ni `Launch Character` (§15).
 4. `CMC.MaxAcceleration` doit valoir au moins `AirStrafe_MaxAccel` pendant `Falling`, sinon le CMC re-clampe (§15).
 5. Ordre dans le Tick : l'air strafe passe **avant** le hard clamp (étape 8 §2.4).
-6. Vérification : en sandbox, sauter puis maintenir `A` + tourner la souris lentement vers la gauche doit faire
-   monter `SPEED` de façon continue. Si la vitesse stagne, le suspect n°1 est `MaxAcceleration`, le n°2 est l'ordre de Tick.
+6. Vérification : en sandbox, sauter puis maintenir `Q` (strafe gauche, AZERTY — cf. D11) + tourner la souris
+   lentement vers la gauche doit faire monter `SPEED` de façon continue. Si la vitesse stagne, le suspect n°1
+   est `MaxAcceleration`, le n°2 est l'ordre de Tick.
+
+### 7.3 Écart d'implémentation (J3, 2026-08-19) — **D14**
+
+`WishDir` n'est **pas** reconstruit depuis `ControlRotation` comme en §7.1. Il est lu directement via
+**`CMC.GetLastInputVector()`**, aplati en Z puis normalisé.
+
+C'est le vecteur monde que le CMC vient effectivement de consommer ce frame — donc *par construction*
+identique à ce que `BP_PlayerCharacter.HandleMoveInput` a poussé via `AddMovementInput`. Reconstruire
+`WishDir` à part dupliquerait la convention « `MoveInput.X` = droite, `.Y` = avant » à deux endroits :
+la moindre divergence (rebinding, modificateur `SwizzleAxis` dans l'`IMC`, changement de base) donnerait
+un gain d'air strafe **désaligné du déplacement réel**, bug quasi impossible à voir autrement qu'à l'aveugle.
+
+Valide parce que `UMovementComponent::ConsumeInputVector()` recopie l'input dans `LastControlInputVector`
+avant de le vider, et que `BPC_MovementState` tick **après** le CMC (`AddTickPrerequisiteComponent`).
+
+`Tune_AirStrafeGainAngleCos` = `Cos(90 + AirStrafe_GainAngleMax)` est **précalculé au `BeginPlay`**
+(dans `CacheTuning`) : aucune trigonométrie en Tick. Vérifié en PIE : `−0.7071` pour `GainAngleMax = 45`.
 
 ---
 
@@ -596,7 +627,23 @@ CMC        : MaxWalkSpeed 2840  MaxAccel 4000  GravityScale 2.4  Mode Walking
 
 Dessins 3D : les 2 traces de wall ride (vert = valide, rouge = rejeté + raison), la capsule de `CanUncrouch()`,
 le vecteur `WishDir` (bleu) et le vecteur `Velocity` (jaune), le point d'impact + `ImpactAngle` du dernier `Event Hit`.
-Toggle : **`IA_DebugToggle` sur `F1`** (`11_ARBITRAGES D15`, `09_INPUT`), uniquement en build Development.
+Toggle : **`IA_DebugToggle` sur `F3`** (`11_ARBITRAGES D15`, `09_INPUT` — `F1` est le raccourci Wireframe
+du viewport éditeur, cf. journal J2 D12), uniquement en build Development.
+
+**État réel au J3** — 6 lignes, clés `OD_0_State` → `OD_5_CMC` :
+
+```
+STATE   Sprinting   prev Walking
+SPEED   2840 uu/s   HUD 284      VZ -120
+CAP     1500        GRACE 0.00   GROUND true
+GAIN    +400  src SlideEntry  il y a 0.42
+JUMP    coyote 0.08   buffer -1.00   consumed true   airgain 4.20
+CMC     MaxWalkSpeed 2840   MaxAccel 2500   GravityScale 2.4
+```
+
+`buffer -1.00` = aucun saut bufferisé (sentinelle, cf. §5.1). `airgain` = `AccelSpeed` du dernier
+frame d'air strafe, en uu/s : **c'est le chiffre à regarder pour juger `AirStrafe_WishSpeedCap`.**
+Les lignes `BHOP` / `DASH` / `SLIDE` / `WALLRIDE` arrivent avec leurs composants (J4–J7).
 
 ### 13.2 `L_Sandbox_Movement` (`Content/OVERDRIVE/Levels/Sandbox/`)
 

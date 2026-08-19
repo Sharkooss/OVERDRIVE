@@ -76,11 +76,27 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 > entrée par entrée (les 10 derniers saisis par Louis au J2). Plus rien ne bloque côté données
 > jusqu'aux Structs du J10.
 
-### J3 — Saut & air control
-- [ ] Jump + coyote time + jump buffer
-- [ ] Air strafing (modèle Quake, `Docs/Specs/SPEC_MOVEMENT.md §7`)
-- [ ] Conservation de la vitesse à l'atterrissage
+### J3 — Saut & air control  *(implémenté le 2026-08-19, cf. `Docs/Journal/2026-08-19_J3_JumpAirStrafe.md`)*
+- [x] Jump + coyote time + jump buffer
+      → `TryJump` / `DoJump` / `HandleLanded` / `UpdateJumpTimers` dans `BPC_MovementState`.
+      `Set Velocity` + `SetMovementMode(Falling)`, jamais `Launch Character` (`SPEC_MOVEMENT §15`).
+      `CanEnterState` : **`Falling → Jumping` passe de refusé à autorisé** — c'est l'exception
+      « sauf coyote time » de la note ⁴ de `SPEC_MOVEMENT §1.3`. Le garde-fou anti-double-saut
+      reste `bJumpConsumed`, pas la table d'états.
+- [x] Air strafing (modèle Quake, `Docs/Specs/SPEC_MOVEMENT.md §7`)
+      → `ApplyAirStrafe(DeltaSeconds)`, inséré à l'**étape 7 du Tick** entre `DriveCMC` et
+      `ClampToHardCap`. `Tune_AirStrafeGainAngleCos` = `cos(90 + GainAngleMax)` précalculé au
+      `BeginPlay` (vérifié en PIE : **−0.7071** = cos 135°).
+- [x] Conservation de la vitesse à l'atterrissage
+      → `SpeedRetention_Landing` appliqué **explicitement** sur `Velocity.XY` dans `HandleLanded`,
+      + `StartGrace(MomentumDecay_GraceTime)` pour que la décroissance ne mange pas le momentum
+      dans la frame qui suit le contact (**décision D13**).
 - [ ] **Test** : gagner de la vitesse en strafant en l'air est perceptible et apprenable
+      → **à valider manche en main par Louis**, checklist dans le journal J3.
+
+> **Correctif hors J3 :** `ClampToHardCap` n'écrivait que la variable `HorizontalSpeed`, jamais la
+> vélocité du CMC — le `Speed_HardCap` n'était donc **jamais** appliqué. Corrigé au J3, avant que
+> l'air strafe ne devienne la première mécanique capable de dépasser le cap.
 
 ### J4 — Slide
 - [ ] `BPC_Slide` : entrée, resize capsule, `CanUncrouch()`, friction, boost, pentes, timer
