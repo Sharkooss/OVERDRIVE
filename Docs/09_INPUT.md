@@ -19,12 +19,19 @@
 | `LMB` | Laser | `IA_Fire` | Digital | **Pressed** (semi-auto, jamais Hold) |
 | `RMB` | Melee | `IA_Melee` | Digital | Pressed |
 | `Espace` | Saut | `IA_Jump` | Digital | Pressed + Released |
-| `Maj gauche` | Sprint | `IA_Sprint` | Digital | Hold (option Toggle dans Settings) |
+| `Maj gauche` | **Marche** (on court par défaut) | `IA_Sprint` | Digital | Hold |
 | `Ctrl gauche` | Slide | `IA_Slide` | Digital | Hold |
 | `Souris 4` / `A` | Dash | `IA_Dash` | Digital | Pressed |
 | `R` | Restart rapide | `IA_Restart` | Digital | Hold 0.4 s |
 | `Échap` | Pause | `IA_Pause` | Digital | Pressed |
 | `F3` | Debug overlay | `IA_DebugToggle` | Digital | Pressed |
+
+> ⚠️ **`IA_Sprint` déclenche la MARCHE depuis le J4** (`D25`, `07_TUNING §4`). On court par défaut,
+> c'est l'essence du jeu ; `Maj` maintenu fait retomber à `Speed_Walk`. L'inversion est faite dans
+> `BP_PlayerCharacter.SetSprintInput` (`SetSprintHeld(NOT bHeld)`), et `BeginPlay` initialise à
+> « pas de marche » — sans ça on marcherait jusqu'au premier appui.
+> **Le nom de l'asset est donc trompeur** : renommage en `IA_Walk` à faire quand Louis le valide
+> (ça touche `IMC_Gameplay` et le nœud d'event, donc ce n'est pas gratuit).
 
 **Décision** : `Souris 4` **et** `A` sont mappés sur `IA_Dash` simultanément.
 Enhanced Input le permet nativement ; ça couvre les souris sans boutons latéraux sans coûter un réglage.

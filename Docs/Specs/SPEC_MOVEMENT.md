@@ -66,8 +66,8 @@ Un composant qui n'obtient pas l'état **annule silencieusement** sa mécanique 
 
 | Depuis \ Vers | Idle | Walking | Sprinting | Sliding | Jumping | Falling | WallRiding | Dashing |
 |---|---|---|---|---|---|---|---|---|
-| **Idle** | — | oui | non¹ | non | oui | oui | non | oui |
-| **Walking** | oui | — | oui | non² | oui | oui | non | oui |
+| **Idle** | — | oui | non¹ | **oui**² | oui | oui | non | oui |
+| **Walking** | oui | — | oui | **oui**² | oui | oui | non | oui |
 | **Sprinting** | non | oui | — | oui | oui | oui | non | oui |
 | **Sliding** | non | oui | oui | — | oui | oui | non | oui |
 | **Jumping** | non | non | non | non | — | oui | oui | oui |
@@ -75,7 +75,13 @@ Un composant qui n'obtient pas l'état **annule silencieusement** sa mécanique 
 | **WallRiding** | non | non | non | non | oui⁵ | oui | non | oui |
 | **Dashing** | oui | oui | oui | oui | oui | oui | oui | — |
 
-¹ passe obligatoirement par `Walking` (le sprint exige de la vitesse). ² il faut d'abord atteindre `Slide_MinEntrySpeed` → `Sprinting`.
+¹ passe obligatoirement par `Walking` (le sprint exige de la vitesse).
+² **Modifié au J4 (D23), sur décision de Louis.** La table exigeait auparavant de passer par `Sprinting`,
+ce qui contredisait `Slide_MinEntrySpeed` (900, soit **sous** `Speed_Walk` = 1000) : `Ctrl` en marche
+simple ne faisait rien. **Le slide ne dépend plus de l'état, seulement de la vitesse.** La seule garde
+est `HorizontalSpeed >= Slide_MinEntrySpeed`, comme le décrit `§4.1 [2]`.
+En dessous du seuil, `TryStartSlide` fait un **`Crouch()` simple** — le joueur a un retour, il ne se
+demande pas si la touche est cassée. Relâcher `IA_Slide` déclenche `ReleaseCrouch()`.
 ³ le slide en l'air est **bufferisé**, pas exécuté (cf. §11). ⁴ le double saut n'existe pas (`Jump_MaxCount`), sauf coyote time.
 → **Implémenté au J3 :** `Falling → Jumping` est **autorisé** dans `CanEnterState`, sinon un saut en
 coyote time laisserait le joueur dans `Falling` avec une vélocité Z positive. Le double saut est bloqué
@@ -207,6 +213,12 @@ EVENT SpeedEffectsTick   (timer looping, 20 Hz)
 ## 3. Sprint
 
 - **Entrée** : `IA_Sprint` (mode `Sprint_Mode`, 07_TUNING §4) + input avant si `Sprint_RequiresForwardInput` + `bIsGrounded`.
+> **`D25` (J4) — on court par défaut, `Shift` fait marcher.** La course est l'essence du jeu, elle ne
+> se mérite pas. L'inversion vit dans `BP_PlayerCharacter.SetSprintInput` (`SetSprintHeld(NOT bHeld)`),
+> **pas** dans `BPC_MovementState` : la sémantique interne (`bSprintHeld` = « le joueur veut courir »)
+> reste juste. `BeginPlay` appelle `SetSprintInput(false)` une fois — sans ça on marcherait jusqu'au
+> premier appui sur `Shift`. L'asset porte encore le nom `IA_Sprint` ; renommage en `IA_Walk` à valider.
+
 - **Montée** : `CurrentSpeedCap` interpolé de `Speed_Walk` à `Speed_SprintCap` en `Sprint_TimeToMax` (`FInterp To Constant`).
 - **Sortie** : relâche (mode Hold), input arrière, perte du sol (→ `Jumping`/`Falling`, le cap reste), entrée en `Sliding`.
 - **Interaction avec le cap** : le sprint **ne peut jamais** dépasser `Speed_SprintCap`. Si `HorizontalSpeed` est déjà
@@ -249,6 +261,131 @@ EVENT SpeedEffectsTick   (timer looping, 20 Hz)
       · IA_Jump (→ §4.3) · perte du sol
 ```
 
+### 4.1 ter — **D24 : le slide conserve, il n'accélère pas** (refonte après playtest, J4)
+
+Verdict de Louis sur le premier prototype : *« le slide donne un trop grand boost de vitesse sans
+aucun effort, ça devient trop facile et mécaniquement 0 difficulté »*. Le modèle est refondu.
+
+**Principe : sur le plat, le slide ne crée pas de vitesse — il la protège.** C'est une mécanique de
+**virage**, la seule qui permette un demi-tour à 180° sans perdre un uu/s. La vitesse ne s'obtient
+que par les pentes, proportionnellement à leur inclinaison.
+
+```
+SLIDESTEP(dt)                                            ← ordre réel, écritures en dernier
+  spd      = |Velocity.XY|
+  curYaw   = MakeRotFromX(Velocity.XY).Yaw
+  tgtYaw   = MakeRotFromX(Character.GetActorForwardVector()).Yaw       ← [0] VIRAGE
+  newYaw   = RInterpToConstant(curYaw, tgtYaw, dt, Slide_TurnRate).Yaw
+  turned   = GetForwardVector(newYaw) * spd                            ← norme conservée
+  N        = GetFloorNormal()
+  newVel   = turned + (N.X, N.Y) * Slide_SlopeAccelBonus * dt          ← [1] pente, VECTORIEL
+  rawSpd   = |newVel|
+  accelerating = rawSpd > |Velocity.XY| + 0.5
+  hold     = accelerating ? Slide_HoldTime : max(0, hold - dt)          ← [2] conservation
+  decaying = !accelerating AND hold <= 0
+  finalSpd = decaying ? rawSpd - Slide_Friction * rawSpd * dt : rawSpd  ← [3] décroissance
+  ─────────────────────────────────────────────────────── écritures :
+  Velocity                = Normalize(newVel) * finalSpd  (Z conservé)
+  CMC.MaxWalkSpeedCrouched = finalSpd
+  SlideTimer, HoldRemaining
+  CheckSlideExit()
+```
+
+**[0] Le virage angulaire — `D26`.** Compter sur `CMC.MaxAcceleration` pour tourner était une erreur
+de conception : à 2500 uu/s, inverser sa course demande **5000 uu/s** de changement de vélocité,
+soit **1.25 s** à `Accel_Ground` = 4000 uu/s². Le joueur voyait sa caméra tourner instantanément et
+son corps continuer tout droit — *« je glisse sur le sol et n'arrive pas à faire un demi-tour serré »*.
+
+`BPC_Slide` fait donc **pivoter le vecteur vitesse lui-même** vers le yaw du regard, à
+`Slide_TurnRate` °/s, **norme strictement conservée**. `bUseControllerRotationYaw = true` sur
+`BP_PlayerCharacter`, donc `GetActorForwardVector()` **est** la direction du regard : pas besoin
+de passer par le `Controller`. À 720 °/s, un demi-tour prend **0.25 s** — c'est la sensation
+d'accroche recherchée.
+
+La rotation est appliquée **avant** l'accélération de pente, ce qui laisse la pente corriger la
+trajectoire ensuite : on ne peut pas remonter une pente en la regardant.
+
+**[1] Pourquoi `(N.X, N.Y)` et pas `Dot(N, VelocityDir)`.** Les composantes horizontales de la normale
+du sol **pointent déjà vers l'aval** et ont pour norme `sin(θ)`. L'accélération est donc à la fois
+bien orientée et correctement mise à l'échelle par l'inclinaison, sans un seul appel trigonométrique.
+Surtout : c'est **vectoriel**, donc ça marche **à vitesse nulle** — on se laisse glisser d'une pente
+sans presser l'avant, ce que la version scalaire du J4 initial ne permettait pas. En montée, le même
+vecteur freine : le cas particulier « friction ×2 » de `§4.1 [6]` disparaît.
+
+**[2] La fenêtre de conservation.** Tant que `Slide_HoldTime` court, la vitesse est **strictement**
+conservée. Elle **se réarme intégralement dès que la pente fait ré-accélérer** : enchaîner
+plat → descente → plat relance le compteur. `Slide_MaxDuration` ne compte que le temps de
+**décroissance**, jamais le temps passé à accélérer.
+
+**[3] Sortie sur vitesse basse** (`Slide_ExitSpeedMin`) : évaluée **uniquement** quand la fenêtre de
+conservation est épuisée. Sans ça, un slide démarré à l'arrêt en haut d'une pente s'annulerait
+à la première frame.
+
+**Impossible d'accélérer accroupi.** `CMC.MaxWalkSpeedCrouched` est réécrit **chaque frame** à la
+vitesse courante du slide — et à **0** quand on est accroupi sans slider,
+**sauf si `bForcedSlide`** : sous un plafond bas ce 0 serait un **softlock** (ni se lever, ni bouger),
+donc le plancher passe à `Speed_Walk` pour permettre de ramper dehors (**`D27`**). Le CMC prime sur
+`MaxWalkSpeed` dès que le personnage est accroupi (`12_PIEGES_OUTILLAGE §6.6`), donc c'est cette clé
+qui gouverne. Conséquences voulues :
+- l'input **réoriente** la vélocité mais ne peut jamais dépasser sa norme → **virage à vitesse constante** ;
+- accroupi à 0 uu/s, pousser l'avant ne fait **rien**.
+
+### `D30` — maintenir la touche **est** l'état slide
+
+Règle unique : **au sol, `IA_Slide` tenu ⇒ `Sliding`.** Il ne doit exister **aucun** instant où le
+joueur tient la touche sans être en slide. Toutes les gardes qui pouvaient créer cet écart sont
+supprimées — `Slide_MinEntrySpeed`, `Slide_ExitSpeedMin`, `Slide_MaxDuration` et `Slide_Cooldown`
+passent **`INACTIVE`** dans `07_TUNING §5`.
+
+```
+TryStartSlide()          ← retenté CHAQUE FRAME tant que la touche est tenue
+  si pas au sol   : mémorise l'instant (pas de fenêtre à respecter)
+  sinon si pas déjà en slide : StartSlide()          ← aucune autre condition
+
+CheckSlideExit()
+  relâche de la touche  OU  perte du sol            ← rien d'autre
+```
+
+La relance chaque frame rend le système **auto-réparant** et rend le buffer d'atterrissage inutile :
+toucher le sol touche tenue déclenche le slide au contact. Elle absorbe aussi le décalage d'une frame
+du `piège §6.7` (à l'atterrissage `CurrentState` vaut encore `Falling`, donc `RequestState(Sliding)`
+est refusé — la frame suivante il passe).
+
+On peut rester en slide **jusqu'à 0 uu/s** : la vitesse se gère par la décroissance, pas par un seuil
+qui éjecte le joueur de l'état.
+
+### `D31` — direction = regard **+** strafe
+
+La cible du virage n'est plus le regard seul :
+
+```
+aim = ActorForward * MoveInput.Y + ActorRight * MoveInput.X      ← regard + strafe
+      (repli sur ActorForward si l'input est nul)
+```
+
+`Q`/`D` infléchissent donc la trajectoire **en plus** de la souris, ce qui donne le contrôle total
+demandé au playtest. Le reste du modèle est inchangé : rotation à `Slide_TurnRate`, norme conservée.
+
+`Slide_EntryBoost` est passé à **0** dans `DA_Movement_Default`. La clé et le nœud
+`AddSpeedGain` restent en place : c'est un bouton disponible, pas du code mort.
+
+### 4.1 bis — Écarts d'implémentation (J4, 2026-08-19)
+
+`BPC_Slide` est un composant **autonome** : il ne modifie rien dans `BPC_MovementState`.
+Il tick **avant** lui grâce à `MovementState.AddTickPrerequisiteComponent(self)` posé dans son
+`BeginPlay` (**D22**) — c'est ce qui satisfait la règle §7.4 sans toucher au code validé du J3.
+
+| Point de la spec | Ce qui est implémenté | Décision |
+|---|---|---|
+| `[3]` resize capsule manuel + offset caméra | **`Character::Crouch()` / `UnCrouch()`** du CMC, avec `CrouchedHalfHeight = CapsuleHalfHeight_Slide` et `MaxWalkSpeedCrouched = Speed_HardCap` posés au `BeginPlay`. Le moteur gère le recentrage au sol ; la caméra descend physiquement avec la capsule, donc `Slide_CameraDrop` n'a pas de code dédié. `Slide_CameraTilt` part au J14 avec le juice | **D21** |
+| `[5]` `CMC.GroundFriction = Slide_Friction` | `CMC.GroundFriction = 0` **et** `BrakingDecelerationWalking = 0`. La friction est appliquée **par nous** dans `SlideStep` : `Speed -= Slide_Friction × Speed × dt`. Motif : `DriveCMC` colle `MaxWalkSpeed` à la vitesse courante, donc la friction moteur ne s'applique jamais. `CF_SlideFrictionOverTime` n'existe pas encore | **D18** |
+| `[6]` bonus de pente en tout-ou-rien | bonus **mis à l'échelle par `SlopeDot`** : `Speed += Slide_SlopeAccelBonus × SlopeDot × dt`. Sinon 15° et 45° accélèrent pareil. **En descente la friction est suspendue**, sinon elle mange presque tout le bonus | **D19** |
+| `[6]` trace de sol | `LineTraceByChannel` (Visibility) vers le bas, longueur **`CapsuleHalfHeight + MaxStepHeight`** (138 uu), normale par défaut `(0,0,1)` si rien n'est touché. **La portée se calibre sur la capsule DEBOUT** : sous le centre d'une capsule sur un plan incliné, le sol est à `(HH − R) + R/cos θ` — 102 uu à 45°, pas 88. Une portée de 94 ratait tout au-delà de 30° (`12_PIEGES §6.8`) | — |
+| — | **`CrouchStep`** : accroupi **sans** slider, l'accélération vers l'aval s'applique quand même (décélération sur le plat). On ne peut donc **jamais** rester figé sur une pente. Tant que `IA_Slide` est tenu, `TryStartSlide` est **retenté chaque frame** — le slide est auto-réparant | **`D29`** |
+| — | **`IsCeilingBlocked()`** : sphere trace vers le haut (rayon `CapsuleRadius`, distance `CapsuleHalfHeight − CapsuleHalfHeight_Slide`), **seulement si accroupi**. `BP_PlayerCharacter` intercale un `Branch` entre `IA_Jump.Started` et `TryJump` : **pas de saut sous un plafond bas**. Debout la fonction sort immédiatement, le slide-jump §4.3 n'est pas touché | **`D28`** |
+| — | **`MaxAcceleration` n'est pas touchée** pendant le slide. Le CMC ne peut pas dépasser `MaxWalkSpeed`, qui est recalculé par `DriveCMC` *après* notre friction : il ne se bat donc pas contre nous, il fournit le pilotage. **Conséquence assumée : le slide est dirigeable à vitesse constante.** Si le playtest juge ça trop libre, brancher `MaxAcceleration` sur une nouvelle clé `Slide_SteerAccel` | **D16** |
+| `[8]` sortie « état perdu » | **pas implémentée au J4** : `(not IsMovingOnGround)` couvre le saut, et le dash n'existe pas encore. **À ajouter au J5** avec la comparaison d'état `!= Sliding` |
+
 ### 4.2 Le piège du dé-crouch bloqué
 
 `SetCapsuleSize` **ne teste rien** : agrandir la capsule sous un plafond bas la fait pénétrer la géométrie,
@@ -281,11 +418,31 @@ EndSlide():
 Le timer `Slide_MaxDuration` est **suspendu** tant que `bForcedSlide` est vrai : on ne peut pas être puni
 d'être coincé sous un plafond.
 
+> **Implémenté autrement (J4, D17).** `UCharacterMovementComponent::UnCrouch()` fait **déjà** ce test
+> d'encroachment : si la capsule ne peut pas grandir, il **refuse de se relever** et réessaie à chaque
+> frame tant que `bWantsToCrouch` est faux. La procédure ci-dessus était une réimplémentation de ce que
+> le moteur fait mieux — et la capsule trace `ForObjects` demandait une liste d'`ObjectTypes` que
+> l'outillage ne sait pas remplir.
+>
+> - `CanUncrouch()` retourne désormais **« la capsule est-elle à hauteur pleine »** (`NOT bIsCrouched`).
+> - `bForcedSlide` = `Character.bIsCrouched` juste après un `UnCrouch()`, retesté chaque frame
+>   par `UpdateForcedSlide`.
+> - **La friction normale est restaurée dès `EndSlide`**, même coincé : sous le plafond on décélère
+>   normalement en accroupi (`MaxWalkSpeedCrouched = Speed_HardCap`, donc aucun clamp brutal).
+>   Le timer n'a plus besoin d'être suspendu — le slide est déjà terminé.
+> - Le piège §12 (« un mesh en `OD_WallRideSurface` n'est plus `WorldStatic` ») **ne s'applique plus
+>   au dé-crouch** : le test moteur est un overlap de canaux de collision, pas une trace `ForObjects`.
+
 ### 4.3 Slide → Jump
 
 Un `IA_Jump` pendant un slide, ou dans les `Slide_JumpWindow` secondes qui suivent sa fin, **conserve intégralement**
 `HorizontalSpeed` (aucun re-clamp par `MaxWalkSpeed`, cf. §15) et applique `Jump_ZVelocity`. C'est le combo central du jeu.
-Passer par `CanUncrouch()` avant : si bloqué, le saut est refusé et l'input part dans le jump buffer (§5).
+~~Passer par `CanUncrouch()` avant : si bloqué, le saut est refusé et l'input part dans le jump buffer (§5).~~
+
+> **D20 (J4) — le saut pendant un slide n'est jamais refusé.** Un saut avalé sans feedback est pire
+> qu'un saut accroupi. Comme on ne redresse pas la capsule au décollage, il n'y a **aucun risque de
+> dépénétration** : le personnage saute en capsule basse et se relève à l'atterrissage
+> (`UpdateForcedSlide`). `EndSlide` est appelé par `CheckSlideExit` dès que le sol est perdu.
 
 ---
 
@@ -634,6 +791,18 @@ Anti-spam : deux `Event Hit` sur le même composant à moins de 0.2 s → une se
 | `OD_WallRideSurface` | **WallRideSurface** | Block | Block | Block | Block | Block | Block | Block | Block | Block |
 | `OD_LevelGeo` | WorldStatic | Block | Block | Block | Block | Block | Block | Block | Block | Block |
 
+### Réglages CMC obligatoires pour le slide (J4)
+
+Trois défauts d'UE hostiles à un jeu de vitesse, tous côté « crouch », tous silencieux :
+
+| Propriété | Défaut UE | Valeur OVERDRIVE | Sans ça |
+|---|---|---|---|
+| `NavAgentProps.bCanCrouch` | `false` | **`true`** | `Crouch()` ne fait **rien**, sans warning (`12_PIEGES §6.5`) |
+| `MaxWalkSpeedCrouched` | `300` | **piloté par `BPC_Slide`** | un slide à 1900 uu/s est écrasé à 300 (`§6.6`) |
+| `bCanWalkOffLedgesWhenCrouching` | `false` | **`true`** | **mur invisible** au bord de chaque plateforme en slide (`§6.10`) |
+
+À revérifier en bloc dès qu'une nouvelle mécanique accroupie apparaît.
+
 **Piège** : un mesh en `OD_WallRideSurface` **n'est plus** de type `WorldStatic`. Toute trace `ForObjects` qui n'inclut
 que `WorldStatic` cessera de le voir (notamment `CanUncrouch()` §4.2 et les traces de sol) → inclure systématiquement
 `WallRideSurface` dans les listes d'object types de la navigation et des traces de dé-crouch.
@@ -675,7 +844,19 @@ CMC     MaxWalkSpeed 2840   MaxAccel 2500   GravityScale 2.4
 
 `buffer -1.00` = aucun saut bufferisé (sentinelle, cf. §5.1). `airgain` = `AccelSpeed` du dernier
 frame d'air strafe, en uu/s : **c'est le chiffre à regarder pour juger `AirStrafe_WishSpeedCap`.**
-Les lignes `BHOP` / `DASH` / `SLIDE` / `WALLRIDE` arrivent avec leurs composants (J4–J7).
+Les lignes `BHOP` / `DASH` / `WALLRIDE` arrivent avec leurs composants (J5–J7).
+
+**Ligne `SLIDE` ajoutée au J4**, clé `OD_6_Slide`, **dessinée par `BPC_Slide` lui-même**
+(il lit `MovementState.bDebugEnabled`, donc `F3` pilote les deux — aucune modification de
+`DrawDebugOverlay`) :
+
+```
+SLIDE   t 0.42 / 1.20   sliding true   forced false   slope 0.50   entry 1500.00
+```
+
+`slope` = `Dot(FloorNormal, DirectionHorizontale)` : **> 0 en descente** (0.26 / 0.50 / 0.71 à
+15° / 30° / 45°), < 0 en montée, ≈ 0 sur le plat. `forced` = capsule coincée sous un plafond.
+`entry` = `HorizontalSpeed` au moment de l'entrée en slide.
 
 ### 13.2 `L_Sandbox_Movement` (`Content/OVERDRIVE/Levels/Sandbox/`)
 

@@ -109,13 +109,65 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 > vélocité du CMC — le `Speed_HardCap` n'était donc **jamais** appliqué. Corrigé au J3, avant que
 > l'air strafe ne devienne la première mécanique capable de dépasser le cap.
 
-### J4 — Slide
-- [ ] `BPC_Slide` : entrée, resize capsule, `CanUncrouch()`, friction, boost, pentes, timer
-- [ ] Enchaînements `Sprint → Slide` et `Sprint → Slide → Jump`
+### J4 — Slide  *(implémenté le 2026-08-19, cf. `Docs/Journal/2026-08-19_J4_Slide.md`)*
+- [x] `BPC_Slide` : entrée, resize capsule, `CanUncrouch()`, friction, boost, pentes, timer
+      → composant **autonome** : 30 variables, 15 fonctions, aucune modification de `BPC_MovementState`.
+      Tick inséré **avant** lui par `AddTickPrerequisiteComponent` depuis son propre `BeginPlay` (**D22**),
+      ce qui satisfait la règle du J3 (`12_PIEGES_OUTILLAGE §6.1`) sans toucher au code validé.
+      → resize capsule = **`Crouch()` / `UnCrouch()` du CMC** (D21) ; `CanUncrouch()` s'appuie sur le test
+      d'encroachment que le moteur fait déjà (**D17**) ; friction appliquée **par nous** en décroissance
+      exponentielle, `CMC.GroundFriction = 0` pendant le slide (**D18**) ; bonus de pente **mis à l'échelle
+      par `SlopeDot`**, friction suspendue en descente (**D19**).
+      → **Vérifié en PIE** : composant instancié, `CacheTuning` a lu les 13 valeurs correctes,
+      `CrouchedHalfHeight = 44`, `MaxWalkSpeedCrouched = 6000`, **et le composant tick**.
+- [x] Enchaînements `Sprint → Slide` et `Sprint → Slide → Jump`
+      → `IA_Slide` (`Ctrl`) câblé en `Started` / `Completed` vers `SetSlideInput`, avec **détection de front**.
+      Le saut pendant un slide n'est **jamais refusé** (**D20**). Slide d'atterrissage réparé : le buffer
+      est retenté chaque frame au lieu d'être consommé une fois (`12_PIEGES_OUTILLAGE §6.7`).
+      → **Correctif après le 1ᵉʳ playtest** : `Ctrl` ne déclenchait **jamais** rien — un nœud `Get` pure
+      était évalué *après* le `Set` qui l'écrasait, rendant la détection de front toujours fausse
+      (`12_PIEGES_OUTILLAGE §2.3b`). Au passage, `write_graph_dsl` avait empilé **80 nœuds orphelins**
+      sur deux graphes de **fonction**, ce que le registre disait impossible (`§2.2b`) — purgés, audit
+      des 3 Blueprints propre.
+      → **D23** : le slide ne dépend plus du sprint. `Idle → Sliding` et `Walking → Sliding` ouverts dans
+      `CanEnterState` (62 autres transitions inchangées, vérifiées par diff). La **vitesse est la seule
+      garde** ; sous `Slide_MinEntrySpeed` on fait un **crouch simple**.
+      → **D24, refonte après le 2ᵉ playtest** : « trop grand boost sans aucun effort, 0 difficulté ».
+      **Le slide ne crée plus de vitesse sur le plat, il la conserve** — `Slide_EntryBoost` 400 → **0**,
+      conservation stricte pendant `Slide_HoldTime` (1 s) puis décroissance. La vitesse ne vient que
+      des **pentes**, par accélération **vectorielle vers l'aval** mise à l'échelle par `sin(pente)` :
+      on glisse d'une rampe à l'arrêt sans presser l'avant. Rejoindre une pente réarme la fenêtre.
+      `MaxWalkSpeedCrouched` réécrit chaque frame à la vitesse courante → **impossible d'accélérer
+      accroupi**, et **virage à 180° à vitesse constante** (la vraie valeur de la mécanique).
+      → **D26, 3ᵉ passe** : le virage ne passe plus par `MaxAcceleration` (1.25 s pour un demi-tour à
+      2500 uu/s — d'où le patinage) mais par une **rotation angulaire du vecteur vitesse** vers le
+      regard, à `Slide_TurnRate` = 720 °/s → **demi-tour en 0.25 s, norme conservée**.
+      Au passage : `BPC_Slide` n'avait **aucun prérequis de tick sur le CMC**, l'ordre
+      `CMC → Slide → MovementState` n'était donc pas garanti. Corrigé.
+      → **D25 — on court par défaut, `Maj` fait marcher.** Inversion dans
+      `BP_PlayerCharacter.SetSprintInput` + init au `BeginPlay` (sinon on marche jusqu'au 1ᵉʳ appui).
+      `IA_Sprint` porte un nom devenu trompeur : renommage en `IA_Walk` **à valider par Louis**.
+      → **D27, 4ᵉ passe** : « ça decay trop vite ». Le vrai problème était un **softlock** —
+      `MaxWalkSpeedCrouched` piloté à 0 hors slide bloquait totalement le joueur coincé sous un
+      plafond bas. Plancher à `Speed_Walk` quand `bForcedSlide`. Retune :
+      `Slide_Friction` 0.4 → **0.15**, `Slide_MaxDuration` 1.2 → **3.0** → un slide à 1500 uu/s
+      couvre ~3500 uu, le tunnel de la zone B en fait 4000.
+      → **5ᵉ passe** : `GetFloorNormal` **ratait le sol dès 30°** — portée calibrée sur la capsule
+      accroupie (94 uu) alors que sous le centre d'une capsule sur pente le sol est à 102 uu à 45°.
+      La normale retombait sur `(0,0,1)` : **aucune pente n'existait**, ni accélération en descente ni
+      freinage en montée. Portée → `CapsuleHalfHeight + MaxStepHeight` = 138 uu (`12_PIEGES §6.8`).
+      → **D28** : `IsCeilingBlocked()` — **pas de saut** quand un plafond bas bloque le dé-crouch.
+      → **D29** : `CrouchStep` — accroupi sans slider, l'accélération de pente s'applique quand même
+      et `TryStartSlide` est retenté chaque frame. **On ne peut plus jamais être figé sur une pente.**
 - [x] **Zone de test pentes + plafond bas dans le sandbox** — *fait en amont le 2026-08-19*
       → Zone B (tunnel 4000 × 1000, intérieur **130 uu**) et Zone C (rampes 15/30/45°, pente 1600 uu,
       chacune vers un plateau). Géométrie vérifiée par trace physique. Détail : `SPEC_MOVEMENT §13.2`.
-- [ ] **Test** : le slide donne envie d'être enchaîné, jamais subi
+- [x] **Test** : le slide donne envie d'être enchaîné, jamais subi
+      → **validé par Louis le 2026-08-19** au 5ᵉ playtest : « tout me paraît bon ».
+      Le modèle a été refondu **deux fois** en cours de journée sur son retour manche en main :
+      d'abord « trop grand boost sans aucun effort, 0 difficulté » (→ `D24`, le slide conserve
+      au lieu de créer), puis « je glisse sur le sol, pas de demi-tour serré » (→ `D26`, virage
+      angulaire). C'est exactement la boucle `10_DEFINITION_OF_DONE §2`.
 - [ ] **Après le J4** : supprimer `Content/LevelPrototyping/` (décision D1, validée le 2026-08-18)
       → **audit fait le 2026-08-19 : 16 assets, _zéro référence externe_.** La suppression est sans
       risque. Le sandbox du J4 a été construit en `/Engine/BasicShapes/Cube` exprès pour ne pas

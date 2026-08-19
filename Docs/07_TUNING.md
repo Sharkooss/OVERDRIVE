@@ -86,7 +86,19 @@ que par slide-boost, dash, wall ride et bunny hop, et **décroît** si le joueur
 |---|---|---|---|
 | `Sprint_TimeToMax` | 0.6 | s | À CALIBRER |
 | `Sprint_RequiresForwardInput` | true | bool | À CALIBRER |
-| `Sprint_Mode` | Hold | Hold/Toggle | À CALIBRER (option dans Settings) |
+| `Sprint_Mode` | **Hold to WALK** | — | À CALIBRER (option dans Settings) |
+
+> **On court par défaut (J4, `D25`).** La course est l'essence du jeu : elle ne se mérite pas,
+> elle se subit. `Speed_SprintCap` (1500) est la vitesse **par défaut** ; `Shift` **maintenu** fait
+> retomber à `Speed_Walk` (1000).
+>
+> L'inversion est faite dans `BP_PlayerCharacter.SetSprintInput` — `SetSprintHeld(NOT bHeld)` —
+> et **pas** dans `BPC_MovementState`, dont la sémantique interne (`bSprintHeld` = « le joueur veut
+> courir ») reste correcte. `BeginPlay` appelle `SetSprintInput(false)` une fois, sinon on marcherait
+> jusqu'au premier appui sur `Shift`.
+>
+> **L'asset s'appelle toujours `IA_Sprint`** alors qu'il déclenche la marche. À renommer en `IA_Walk`
+> quand Louis le validera — ça touche `IMC_Gameplay` et le nœud d'event, donc ce n'est pas gratuit.
 
 ---
 
@@ -94,16 +106,85 @@ que par slide-boost, dash, wall ride et bunny hop, et **décroît** si le joueur
 
 | Clé | Valeur | Unité | Statut | Note |
 |---|---|---|---|---|
-| `Slide_MinEntrySpeed` | 900 | uu/s | À CALIBRER | en dessous → crouch simple |
-| `Slide_EntryBoost` | 400 | uu/s | À CALIBRER | boost additif à l'entrée |
-| `Slide_MaxDuration` | 1.2 | s | À CALIBRER | |
-| `Slide_Friction` | 0.4 | — | À CALIBRER | vs 3.0 debout |
-| `Slide_ExitSpeedMin` | 1200 | uu/s | À CALIBRER | on ne sort jamais plus lent que ça |
-| `Slide_SlopeAccelBonus` | 1800 | uu/s² | À CALIBRER | en descente, le slide accélère |
-| `Slide_Cooldown` | 0.25 | s | À CALIBRER | anti-spam du boost d'entrée |
-| `Slide_JumpWindow` | 0.20 | s | À CALIBRER | fenêtre post-slide où le saut garde le boost |
-| `Slide_CameraDrop` | 40 | uu | À CALIBRER | descente caméra |
-| `Slide_CameraTilt` | 6 | ° | À CALIBRER | |
+| `Slide_MinEntrySpeed` | 900 | uu/s | ⛔ **INACTIVE** | supprimée du code au J4 (`D30`) : maintenir `Ctrl` au sol déclenche **toujours** un slide, quelle que soit la vitesse |
+| `Slide_EntryBoost` | **0** | uu/s | À CALIBRER | **passé de 400 à 0 au J4** — le slide ne crée plus de vitesse sur le plat (`D24`). Reste un bouton si un petit coup de pouce s'avère nécessaire |
+| `Slide_HoldTime` | 1.0 | s | À CALIBRER | **durée pendant laquelle la vitesse est strictement conservée**, décroissance zéro. Se **réarme** dès qu'une pente fait ré-accélérer |
+| `Slide_SlopeMinSin` | 0.1 | sin(θ) | À CALIBRER | pente minimale (≈ 5.7°) pour qu'un slide démarre **sans condition de vitesse** |
+| `Slide_TurnRate` | 720 | °/s | À CALIBRER | **vitesse de virage du slide** : la vélocité pivote vers le regard à cette cadence. 720 = un **demi-tour en 0.25 s**. C'est *le* curseur de la mécanique |
+| `Slide_MaxDuration` | 3.0 | s | ⛔ **INACTIVE** | ne met plus fin au slide (`D30`). Le compteur tourne encore et s'affiche dans l'overlay (`decay x / 3.00`), **à titre indicatif seulement** |
+| `Slide_Friction` | **0.15** | —/s | À CALIBRER | coefficient de décroissance exponentielle, **appliqué seulement après `Slide_HoldTime`**. **Passé de 0.4 à 0.15 au J4** : ça tombait trop vite, un long tunnel devenait infranchissable |
+| `Slide_ExitSpeedMin` | 1200 | uu/s | ⛔ **INACTIVE** | supprimée du code au J4 (`D30`) : on peut rester en slide **jusqu'à 0 uu/s** tant que la touche est tenue |
+| `Slide_SlopeAccelBonus` | 1800 | uu/s² | À CALIBRER | accélération **vectorielle vers l'aval**, multipliée par `sin(pente)` : 466 / 900 / 1273 uu/s² à 15° / 30° / 45°. Repère : la gravité réelle donnerait `2.4 g × sin θ` = 1176 uu/s² à 30° |
+| `Slide_Cooldown` | 0.25 | s | ⛔ **INACTIVE** | l'anti-spam protégeait le boost d'entrée, qui vaut désormais 0. Un cooldown créerait un état « je tiens `Ctrl` et je ne slide pas » — interdit (`D30`) |
+| `Slide_JumpWindow` | 0.20 | s | ⛔ **jamais implémentée** | le saut conserve déjà 100 % du momentum (`SpeedRetention_Jump = 1.0`), la fenêtre n'a pas d'objet en l'état |
+| `Slide_CameraDrop` | 40 | uu | À CALIBRER | descente caméra — **pas de code au J4** : le crouch du CMC fait déjà descendre la caméra de 44 uu (`D21`) |
+| `Slide_CameraTilt` | 6 | ° | À CALIBRER | **reporté au J14** (juice) |
+
+> ### Le modèle de slide (refondu au J4 après playtest — `D24`)
+>
+> **Le slide ne crée jamais de vitesse sur le plat. Il la préserve.** C'est un outil de *virage*,
+> pas un accélérateur. Le premier prototype donnait +400 uu/s gratuits à chaque appui : trop fort,
+> aucune difficulté mécanique. Refondu.
+>
+> **Trois phases, par frame :**
+>
+> 1. **Pente** — accélération **vectorielle vers l'aval** :
+>    `Velocity.XY += (FloorNormal.X, FloorNormal.Y) × Slide_SlopeAccelBonus × dt`.
+>    Les composantes horizontales de la normale pointent déjà vers l'aval et ont pour norme `sin(θ)` :
+>    la mise à l'échelle par l'inclinaison est **gratuite et exacte**. Comme c'est vectoriel et non
+>    scalaire, ça fonctionne **à l'arrêt** — on se laisse glisser sans toucher à l'avant.
+>    En montée, le même vecteur freine. Aucun cas particulier.
+> 2. **Conservation** — tant que `Slide_HoldTime` n'est pas épuisée, la vitesse est **strictement
+>    conservée**, décroissance nulle. C'est la fenêtre où l'on tourne à 180° sans rien perdre.
+> 3. **Décroissance** — ensuite seulement : `Speed -= Slide_Friction × Speed × dt`.
+>
+> **Le compteur se réarme dès que la pente fait ré-accélérer** (`newSpeed > oldSpeed`). Rejoindre une
+> descente en plein slide relance donc 1 s de conservation derrière. `Slide_MaxDuration` ne compte
+> que le temps de décroissance : une pente ne consomme pas ce budget.
+>
+> **Le virage est piloté angulairement, pas par l'accélération du CMC** (`D26`). Compter sur
+> `MaxAcceleration` pour tourner était l'erreur : à 2500 uu/s, inverser sa course demande 5000 uu/s
+> de changement, soit **1.25 s** à 4000 uu/s² — d'où la sensation de « glisser sur le sol sans
+> pouvoir tourner ». Désormais `BPC_Slide` fait **pivoter le vecteur vitesse vers le regard** à
+> `Slide_TurnRate` °/s, norme conservée. `720 °/s` = demi-tour en **0.25 s**, ça accroche.
+>
+> **On ne peut pas accélérer accroupi.** `BPC_Slide` écrit `CMC.MaxWalkSpeedCrouched = vitesse
+> courante` à chaque frame : à 0 uu/s on ne bouge pas, même en poussant l'avant. Cette clé prime
+> sur `MaxWalkSpeed` dès que le personnage est accroupi (cf. `12_PIEGES_OUTILLAGE §6.6`).
+>
+> **Exception obligatoire — le dé-crouch bloqué** (`D27`). Accroupi **sous un plafond bas**, ce
+> plafond de 0 uu/s est un **softlock** : on ne peut plus ni se lever ni bouger. Quand
+> `bForcedSlide` est vrai, le plancher passe donc à **`Speed_Walk`** : on rampe pour sortir, et
+> comme 1000 > `Slide_MinEntrySpeed` (900), un nouvel appui sur `Ctrl` relance un slide.
+>
+> **Chiffres du modèle** (entrée à 1500 uu/s sur du plat) : 1 s à vitesse constante, puis
+> décroissance à 0.15 → `Slide_ExitSpeedMin` (1200) atteint après **1.5 s**, soit **~3500 uu**
+> parcourus. Entrée à 2500 (après un air strafe) : `Slide_MaxDuration` (3 s) devient le
+> déclencheur, pour **~8000 uu**. Le tunnel de la zone B fait 4000 uu.
+>
+> Pendant le slide, `CMC.GroundFriction` et `BrakingDecelerationWalking` sont mis à **0** : toute la
+> dynamique est pilotée par `BPC_Slide`, sans double comptage.
+>
+> ### `D30` — maintenir la touche **est** l'état slide
+>
+> Règle unique, sans exception : **au sol, `IA_Slide` tenu ⇒ on est en `Sliding`.**
+> Il ne doit exister **aucun** instant où le joueur tient la touche et n'est pas en slide.
+> Toutes les gardes de sortie et d'entrée qui pouvaient créer cet écart ont été supprimées —
+> d'où les 4 clés `INACTIVE` ci-dessus.
+>
+> - **Entrée** : aucune condition de vitesse, de pente ni de cooldown. Retentée **chaque frame**
+>   tant que la touche est tenue, donc l'atterrissage touche-tenue déclenche le slide au contact,
+>   sans fenêtre de buffer à respecter.
+> - **Sortie** : **relâche de la touche** ou **perte du sol**. Rien d'autre.
+> - On peut donc rester accroupi-slide **jusqu'à 0 uu/s**. C'est voulu : la vitesse se gère par
+>   la décroissance, pas par un seuil qui éjecte le joueur de l'état.
+>
+> **Direction** : la cible du virage est `regard + strafe`, pas le regard seul —
+> `ActorForward × Move.Y + ActorRight × Move.X`, et le regard seul si l'input est nul.
+> `Q`/`D` infléchissent donc la trajectoire en plus de la souris (`D31`).
+>
+> La table d'états autorise `Idle → Sliding` et `Walking → Sliding` (`D23`) : le slide ne dépend
+> ni du sprint, ni de la vitesse.
 
 ---
 
