@@ -197,6 +197,42 @@ box/convex), **normales sorties et lissage correct — la scène est éclairée,
 immédiatement** (`11_ARBITRAGES D2`), UV canal 0 uniquement (**pas de lightmap** : l'éclairage est entièrement
 dynamique, Lumen, Static Lighting désactivé), 1 material slot, **Nanite désactivé** (trop peu de tris pour valoir le coût).
 
+### 3.1 Kit de props de ville — `OD_EnvKit_City` (importé le 2026-08-19)
+
+**Les 23 `SM_Module_*` de §3 n'existent toujours pas.** En revanche Louis a produit en amont un kit
+de **40 props de ville blanche** (`Art_Source/OD_EnvKit_City.blend` + `Art_Source/EnvKit/*.fbx`),
+importés dans **`Content/OVERDRIVE/Art/Meshes/Props/`**.
+
+> **Décision (agent, 2026-08-19) — ils vont dans `Props/`, pas dans `Modules/`.**
+> `Modules/` est réservé aux 23 `SM_Module_*` verrouillés ci-dessus ; la clause « aucun autre mesh
+> d'environnement n'est autorisé en v1 **hors props de décor** » les couvre exactement.
+> Renommer un prop en `SM_Module_*` reviendrait à ouvrir le kit verrouillé sans arbitrage.
+
+Mesuré à l'import (bornes locales, LOD0) :
+
+| Constat | Valeur |
+|---|---|
+| Meshes | 40 props + `SM_Weapon_LaserPistol` (→ `Player/Meshes/`, cf. `06_CONVENTIONS §9`) |
+| Grille | **100 % sur la grille de 100 uu**, sur les 3 axes, sans exception |
+| Pivots | coin `X− Y− Z−` ou bas/centre pour les pièces symétriques — conforme à §3 |
+| Triangles | **20 à 228** par prop (budget §7.1 : 100–500). Kit complet ≈ **2 900 tris** |
+| Collision | **UCX importée depuis le FBX** sur les 41 (`bCustomizedCollision = true`) |
+| Nanite | désactivé sur les 41 — conforme `SPEC_ART_DIRECTION §5.5` |
+| Material slots | **nommés par token de `PALETTE.md`** (`M_OD_White_Structure`, `M_OD_Red_Traversal`…), 2 à 5 slots par mesh |
+
+**Le slot nommé par token est le bon choix** : la couleur n'est pas dans le mesh. Assigner 10 `MI_`
+une fois colore les 40 props d'un coup, et un prop se recolore sans réexport.
+
+#### Écarts à trancher
+
+| # | Écart | Conséquence |
+|---|---|---|
+| A | **26 props sur 40 portent un slot `M_OD_Red_Traversal`**, dont ~15 purement décoratifs (AC, caisses, cuve, cheminée, groupe électrogène…) | Viole §10.1 règle 2 et `SPEC_ART_DIRECTION §10.3` : *une arête rouge est praticable, sans exception*. **Se corrige à l'assignation de matériau, pas au modèle** — coût quasi nul |
+| B | **Axe de longueur sur `+Y`** pour tous les props linéaires (`Air_Duct`, `Water_Pipe`, `Roof_Edge`, `Safety_Rail`, `Pipe_Section`) et **canon du pistolet sur `+Y`** | §3 impose la longueur sur `+X`. Interne au kit c'est cohérent ; mixé avec les futurs `SM_Module_*` c'est une source d'erreur de rotation. **Soit** on réexporte, **soit** on écrit ici que le kit de props est orienté `+Y` |
+| C | `SM_Roof_Edge` et `SM_Safety_Rail` font **200 uu de haut** | `SM_Module_Edge_800` est plafonné à **50 uu = `MaxStepHeight`** précisément pour ne jamais bloquer. À 200 uu ces deux props **arrêtent le joueur** — à réserver aux bords non franchissables |
+| D | `lightMapCoordinateIndex = 1` sur les 41 | Un canal UV de lightmap a été généré à l'import alors que le Static Lighting est désactivé. Mémoire gaspillée, sans effet visuel. Cosmétique |
+| E | `SM_Neon_Pillar` | Nom hérité de la DA v1 nocturne, comme l'ex-`SM_Module_NeonStrip_400`. À renommer si la pièce sert de bande de traversée |
+
 ---
 
 ## 4. Grammaire des espaces
