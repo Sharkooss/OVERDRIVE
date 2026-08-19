@@ -92,13 +92,13 @@ que par slide-boost, dash, wall ride et bunny hop, et **décroît** si le joueur
 > elle se subit. `Speed_SprintCap` (1500) est la vitesse **par défaut** ; `Shift` **maintenu** fait
 > retomber à `Speed_Walk` (1000).
 >
-> L'inversion est faite dans `BP_PlayerCharacter.SetSprintInput` — `SetSprintHeld(NOT bHeld)` —
+> L'inversion est faite dans `BP_PlayerCharacter.SetWalkInput` — `SetSprintHeld(NOT bHeld)` —
 > et **pas** dans `BPC_MovementState`, dont la sémantique interne (`bSprintHeld` = « le joueur veut
-> courir ») reste correcte. `BeginPlay` appelle `SetSprintInput(false)` une fois, sinon on marcherait
+> courir ») reste correcte. `BeginPlay` appelle `SetWalkInput(false)` une fois, sinon on marcherait
 > jusqu'au premier appui sur `Shift`.
 >
-> **L'asset s'appelle toujours `IA_Sprint`** alors qu'il déclenche la marche. À renommer en `IA_Walk`
-> quand Louis le validera — ça touche `IMC_Gameplay` et le nœud d'event, donc ce n'est pas gratuit.
+> L'asset s'appelait `IA_Sprint` ; **renommé en `IA_Walk` au J4** (2026-08-19), avec la fonction
+> `SetSprintInput` → **`SetWalkInput`**. Plus aucun nom ne ment sur ce qu'il fait.
 
 ---
 

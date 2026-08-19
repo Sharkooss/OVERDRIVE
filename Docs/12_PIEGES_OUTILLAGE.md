@@ -99,6 +99,8 @@ défaut du pin — `false`, `0.0` — qui n'est pas vide. C'est précisément ce
 | 5.5 | 🟠 | Des assets **homonymes** dans deux dossiers (`Content/Input/IA_Move` vs `OVERDRIVE/Player/Input/IA_Move`) font que l'éditeur lie les nœuds au mauvais asset, sans moyen de désambiguïser par outil. | Un seul emplacement par nom. Tout le contenu du projet vit dans `Content/OVERDRIVE/`. |
 | 5.6 | 🟠 | Les modifications faites par outil restent **en mémoire de l'éditeur** : `git status` ne voit rien. | `AssetTools.save_assets([...])` avant tout `git add`. |
 | 5.7 | ⚪ | Le format littéral d'un pin `Vector2D` est `(X=0.000000,Y=0.000000)`. `"0,0"` échoue à la compilation. | — |
+| 5.8 | 🟠 | **Renommer un `IA_*` ne renomme pas la classe générée de son event node.** `AssetTools.move` met bien à jour l'`IMC` et la référence d'asset dans le nœud, mais le `type_id` du `K2Node_EnhancedInputAction` reste `…EnhancedInputActionIA_AncienNom`. Un `find_node_types` renverra donc l'ancien nom indéfiniment. | Après `IA_Sprint` → `IA_Walk` : le nœud pointait sur `IA_Walk.IA_Walk` et fonctionnait, mais s'annonçait encore `EnhancedInputActionIA_Sprint`. | **Supprimer puis recréer le nœud d'event** avec le nouveau `type_id` (`Input\|EnhancedActionEvents\|IA_NouveauNom`, cf. 2.14), et recâbler ses pins exec. Pas d'autre moyen. |
+| 5.9 | 🟠 | **Aucun outil ne renomme un graphe de fonction Blueprint.** | — | Créer la nouvelle fonction, réécrire son corps, recréer les nœuds d'appel avec le nouveau `type_id` (`CallFunction\|NouveauNom`), recâbler, puis `remove_function_graph` sur l'ancienne. **Cartographier les sites d'appel avant** (`find_nodes` + `get_node_infos`, filtrer sur le `type_id`) : rien ne les liste automatiquement. |
 
 ---
 

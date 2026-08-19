@@ -29,8 +29,8 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 ### J1 — Fondations ✅ (2026-08-18, cf. `Docs/Journal/2026-08-18_J1_Fondations.md`)
 - [x] Supprimer `Content/FirstPerson`, `Content/Characters`, `Content/LevelPrototyping` (garder `Input/` et les matériaux de grid le temps du blockout)
       → `LevelPrototyping/Materials|Textures|Meshes` conservés, seul `Interactable/` supprimé.
-      **D1 validée par Louis le 2026-08-18** : le reste de `LevelPrototyping/` est supprimé **après le J4**
-      (les meshes servent aux pentes du slide).
+      **D1 validée par Louis le 2026-08-18**, **exécutée le 2026-08-19 après le J4** : les 16 assets
+      restants de `LevelPrototyping/` sont supprimés. `Content/` ne contient plus que `OVERDRIVE/`.
       → `Content/Input/` **supprimé au J2** (9 assets : 4 `IA_*`, 2 `IMC_*`, 3 assets tactiles) :
       doublons de nom avec `OVERDRIVE/Player/Input/`, l'éditeur se liait au mauvais asset.
       Zéro référence entrante. Cf. journal J2 D9.
@@ -67,7 +67,7 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       garde `Sprint_RequiresForwardInput`, cap figé en l'air (`SPEC_MOVEMENT §3`)
 - [x] Overlay debug à l'écran : état, vitesse, cap, grace, sol, dernier gain, état du CMC
 - [x] Câblage input `BP_PlayerCharacter` (hors J2 à l'origine, mais rien n'est testable sans) :
-      `IA_Move`, `IA_Look`, `IA_Sprint`, `IA_DebugToggle` + `AddMappingContext` au `BeginPlay`
+      `IA_Move`, `IA_Look`, `IA_Walk`, `IA_DebugToggle` + `AddMappingContext` au `BeginPlay`
 - [x] **Test** : le sprint plafonne bien à `Speed_SprintCap`
       → validé par Louis le 2026-08-19 : marche 1000, sprint 1500, **sans à-coup**,
       pas de sprint en marche arrière, cap qui redescend au relâchement. Aucune valeur retunée.
@@ -145,8 +145,8 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       Au passage : `BPC_Slide` n'avait **aucun prérequis de tick sur le CMC**, l'ordre
       `CMC → Slide → MovementState` n'était donc pas garanti. Corrigé.
       → **D25 — on court par défaut, `Maj` fait marcher.** Inversion dans
-      `BP_PlayerCharacter.SetSprintInput` + init au `BeginPlay` (sinon on marche jusqu'au 1ᵉʳ appui).
-      `IA_Sprint` porte un nom devenu trompeur : renommage en `IA_Walk` **à valider par Louis**.
+      `BP_PlayerCharacter.SetWalkInput` + init au `BeginPlay` (sinon on marche jusqu'au 1ᵉʳ appui).
+      `IA_Walk` porte un nom devenu trompeur : renommage en `IA_Walk` **à valider par Louis**.
       → **D27, 4ᵉ passe** : « ça decay trop vite ». Le vrai problème était un **softlock** —
       `MaxWalkSpeedCrouched` piloté à 0 hors slide bloquait totalement le joueur coincé sous un
       plafond bas. Plancher à `Speed_Walk` quand `bForcedSlide`. Retune :
@@ -168,10 +168,17 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       d'abord « trop grand boost sans aucun effort, 0 difficulté » (→ `D24`, le slide conserve
       au lieu de créer), puis « je glisse sur le sol, pas de demi-tour serré » (→ `D26`, virage
       angulaire). C'est exactement la boucle `10_DEFINITION_OF_DONE §2`.
-- [ ] **Après le J4** : supprimer `Content/LevelPrototyping/` (décision D1, validée le 2026-08-18)
-      → **audit fait le 2026-08-19 : 16 assets, _zéro référence externe_.** La suppression est sans
-      risque. Le sandbox du J4 a été construit en `/Engine/BasicShapes/Cube` exprès pour ne pas
-      recréer de dépendance. D1 peut être exécutée dès que Louis le dit.
+- [x] **Après le J4** : supprimer `Content/LevelPrototyping/` (décision D1, validée le 2026-08-18)
+      → **exécutée le 2026-08-19.** Référenceurs revérifiés **un par un juste avant** la suppression
+      (et non sur la foi de l'audit de la veille) : 16 assets, **zéro référence externe**, uniquement
+      des renvois internes entre matériaux et meshes du dossier.
+      `Content/` ne contient plus que `OVERDRIVE/` — conforme à **R6**.
+      Vérifié en PIE après coup : le sandbox charge sans une seule référence manquante.
+- [x] **Renommage `IA_Sprint` → `IA_Walk`** (le nom mentait depuis `D25`)
+      → `IMC_Gameplay` a suivi tout seul. **L'event node a dû être recréé** : sa classe générée
+      restait `EnhancedInputActionIA_Sprint` même après le renommage de l'asset.
+      Fonction `BP_PlayerCharacter.SetSprintInput` → **`SetWalkInput`** (pas d'outil de renommage :
+      nouvelle fonction, 3 sites d'appel recâblés, ancienne supprimée).
 
 > **Dette du J3 levée en amont** : la garde de décroissance sur l'état (`IsDecayAllowedState`) était
 > annoncée manquante par le journal J2 — elle existait déjà et fonctionne. Note corrigée.

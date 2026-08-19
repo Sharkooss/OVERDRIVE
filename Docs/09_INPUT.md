@@ -19,19 +19,21 @@
 | `LMB` | Laser | `IA_Fire` | Digital | **Pressed** (semi-auto, jamais Hold) |
 | `RMB` | Melee | `IA_Melee` | Digital | Pressed |
 | `Espace` | Saut | `IA_Jump` | Digital | Pressed + Released |
-| `Maj gauche` | **Marche** (on court par défaut) | `IA_Sprint` | Digital | Hold |
+| `Maj gauche` | **Marche** (on court par défaut) | `IA_Walk` | Digital | Hold |
 | `Ctrl gauche` | Slide | `IA_Slide` | Digital | Hold |
 | `Souris 4` / `A` | Dash | `IA_Dash` | Digital | Pressed |
 | `R` | Restart rapide | `IA_Restart` | Digital | Hold 0.4 s |
 | `Échap` | Pause | `IA_Pause` | Digital | Pressed |
 | `F3` | Debug overlay | `IA_DebugToggle` | Digital | Pressed |
 
-> ⚠️ **`IA_Sprint` déclenche la MARCHE depuis le J4** (`D25`, `07_TUNING §4`). On court par défaut,
+> ⚠️ **`IA_Walk` déclenche la MARCHE depuis le J4** (`D25`, `07_TUNING §4`). On court par défaut,
 > c'est l'essence du jeu ; `Maj` maintenu fait retomber à `Speed_Walk`. L'inversion est faite dans
-> `BP_PlayerCharacter.SetSprintInput` (`SetSprintHeld(NOT bHeld)`), et `BeginPlay` initialise à
+> `BP_PlayerCharacter.SetWalkInput` (`SetSprintHeld(NOT bHeld)`), et `BeginPlay` initialise à
 > « pas de marche » — sans ça on marcherait jusqu'au premier appui.
-> **Le nom de l'asset est donc trompeur** : renommage en `IA_Walk` à faire quand Louis le valide
-> (ça touche `IMC_Gameplay` et le nœud d'event, donc ce n'est pas gratuit).
+> **L'asset s'appelait `IA_Sprint` jusqu'au J4** — renommé en `IA_Walk` le 2026-08-19 sur validation
+> de Louis, en même temps que la fonction `BP_PlayerCharacter.SetSprintInput` → **`SetWalkInput`**.
+> `IMC_Gameplay` a suivi automatiquement ; l'event node a dû être **recréé** (sa classe générée
+> gardait l'ancien nom).
 
 **Décision** : `Souris 4` **et** `A` sont mappés sur `IA_Dash` simultanément.
 Enhanced Input le permet nativement ; ça couvre les souris sans boutons latéraux sans coûter un réglage.
@@ -76,7 +78,7 @@ On ne se contente jamais de `Set Input Mode`.
 - **Trigger `Pressed` uniquement.** Le laser est semi-auto (GDD §19).
   Le cooldown est géré par `BPC_Heat` / `BP_LaserWeapon`, pas par le trigger.
 
-### `IA_Sprint`
+### `IA_Walk`
 - Trigger `Hold` par défaut. Le mode Toggle est une option de Settings :
   le `PC_Overdrive` lit `Sprint_Mode` et interprète l'événement, on ne change pas l'asset.
 
@@ -90,10 +92,10 @@ On ne se contente jamais de `Set Input Mode`.
 >
 > | Sens voulu | Implémentation réelle | Actions concernées |
 > |---|---|---|
-> | « **tant que** la touche est tenue » | **aucun trigger explicite** (sémantique `Down` : `Triggered` à chaque frame tant que c'est tenu, `Completed` au relâchement) | `IA_Sprint`, `IA_Slide` |
+> | « **tant que** la touche est tenue » | **aucun trigger explicite** (sémantique `Down` : `Triggered` à chaque frame tant que c'est tenu, `Completed` au relâchement) | `IA_Walk`, `IA_Slide` |
 > | « il faut tenir **N secondes** avant que ça parte » | **`InputTriggerHold`** avec `HoldTimeThreshold` | `IA_Restart` (0.4 s) |
 >
-> Mettre un `InputTriggerHold` sur `IA_Sprint` imposerait un délai d'une seconde avant que
+> Mettre un `InputTriggerHold` sur `IA_Walk` imposerait un délai d'une seconde avant que
 > le sprint démarre — exactement ce que le pilier « fun à contrôler » interdit.
 >
 > `IA_Jump` n'a lui non plus **aucun trigger** : il a besoin de `Started` **et** `Completed`

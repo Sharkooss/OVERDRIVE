@@ -35,7 +35,7 @@ Un composant qui n'obtient pas l'état **annule silencieusement** sa mécanique 
                           ▲  IA_Dash + charge dispo          │ fin (Dash_Duration)
      ─────────────────────┴──────────────────────────────────┴─────────────────────
 
-        ┌────────┐  input mvt   ┌─────────┐  IA_Sprint + fwd  ┌───────────┐
+        ┌────────┐  input mvt   ┌─────────┐  IA_Walk + fwd  ┌───────────┐
         │  IDLE  │◄────────────►│ WALKING │◄─────────────────►│ SPRINTING │
         └────────┘   speed~0    └─────────┘   relâche/recul   └───────────┘
              │                       │                              │
@@ -136,7 +136,7 @@ Aucun `Get` de `DA_Movement_Default` en Tick : cacher la struct au `BeginPlay`, 
 | `SetHorizontalSpeed(NewSpeed)` | fonction | Conserve la direction, écrit `CMC.Velocity`. **Point d'entrée unique** des composants |
 | `SetSpeedCapOverride(NewCap, Duration)` | fonction | Cap temporaire (dash, wall ride) ; `Duration = 0` → permanent jusqu'à `ClearSpeedCapOverride()` |
 | `SetMoveInput(MoveInput: Vector2D)` | fonction | Appelée par `BP_PlayerCharacter` sur `IA_Move` (Triggered **et** Completed → zéro). Cf. D7 |
-| `SetSprintHeld(bHeld: bool)` | fonction | Appelée par `BP_PlayerCharacter` sur `IA_Sprint` Started / Completed. Cf. D7 |
+| `SetSprintHeld(bHeld: bool)` | fonction | Appelée par `BP_PlayerCharacter` sur `IA_Walk` Started / Completed. Cf. D7 |
 | `ToggleDebug()` | fonction | Bascule `bDebugEnabled` (F1, `IA_DebugToggle`) |
 | `StartGrace(Duration)` | fonction | Arme `GraceTimeRemaining = Duration` (typiquement `MomentumDecay_GraceTime`) : suspend la décroissance §2.4-5. Appelée par `BPC_Dash` (§8), `BPC_WallRide` (§9.3) et les pénalités §10.2 |
 | `IsGrounded() → bool` | pure | |
@@ -212,12 +212,13 @@ EVENT SpeedEffectsTick   (timer looping, 20 Hz)
 
 ## 3. Sprint
 
-- **Entrée** : `IA_Sprint` (mode `Sprint_Mode`, 07_TUNING §4) + input avant si `Sprint_RequiresForwardInput` + `bIsGrounded`.
+- **Entrée** : `IA_Walk` (mode `Sprint_Mode`, 07_TUNING §4) + input avant si `Sprint_RequiresForwardInput` + `bIsGrounded`.
 > **`D25` (J4) — on court par défaut, `Shift` fait marcher.** La course est l'essence du jeu, elle ne
-> se mérite pas. L'inversion vit dans `BP_PlayerCharacter.SetSprintInput` (`SetSprintHeld(NOT bHeld)`),
+> se mérite pas. L'inversion vit dans `BP_PlayerCharacter.SetWalkInput` (`SetSprintHeld(NOT bHeld)`),
 > **pas** dans `BPC_MovementState` : la sémantique interne (`bSprintHeld` = « le joueur veut courir »)
-> reste juste. `BeginPlay` appelle `SetSprintInput(false)` une fois — sans ça on marcherait jusqu'au
-> premier appui sur `Shift`. L'asset porte encore le nom `IA_Sprint` ; renommage en `IA_Walk` à valider.
+> reste juste. `BeginPlay` appelle `SetWalkInput(false)` une fois — sans ça on marcherait jusqu'au
+> premier appui sur `Shift`. L'asset s'appelait `IA_Sprint` : **renommé `IA_Walk` au J4**, avec la
+> fonction `SetSprintInput` → `SetWalkInput`. Plus aucun nom ne ment sur ce qu'il fait.
 
 - **Montée** : `CurrentSpeedCap` interpolé de `Speed_Walk` à `Speed_SprintCap` en `Sprint_TimeToMax` (`FInterp To Constant`).
 - **Sortie** : relâche (mode Hold), input arrière, perte du sol (→ `Jumping`/`Falling`, le cap reste), entrée en `Sliding`.
@@ -753,7 +754,7 @@ Anti-spam : deux `Event Hit` sur le même composant à moins de 0.2 s → une se
 | **Jump pendant Wall Ride** | = Wall Jump, §9.3. Jamais un saut normal. |
 | **Jump pendant Dash** | Refusé pendant la durée. Bufferisé via `JumpBufferedTime`, consommé à la sortie si dans `Jump_BufferTime`. |
 | **Dash pendant Jump/Falling** | Accepté. `Dash_ZLockOnGround` ne s'applique pas → dash 3D possible vers le haut/bas. |
-| **Sprint pendant Slide** | Ignoré. Le sprint reprend automatiquement à la sortie si `IA_Sprint` est maintenu. |
+| **Sprint pendant Slide** | Ignoré. Le sprint reprend automatiquement à la sortie si `IA_Walk` est maintenu. |
 | **Wall Ride pendant Slide** | Impossible : le slide est un état sol, la détection murale ne tourne qu'en `Falling`. |
 | **Bunny hop après Slide** | Oui : sortie de slide → saut dans `Slide_JumpWindow` → atterrissage → hop dans `BHop_PerfectWindow`. La chaîne cumule les deux gains, clampés par `BHop_MaxChainGain` puis `Speed_HardCap`. |
 | **Air strafe pendant Dash** | Désactivé (`CurrentState == Dashing` exclu à l'étape 7 §2.4). Le dash est une trajectoire, pas une suggestion. |
