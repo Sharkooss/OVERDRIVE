@@ -62,5 +62,8 @@ Art_Source/*.blend1
 Art_Source/*.blend2
 Art_Source/*.blend[0-9]
 
+# Images intermédiaires des planches de contact (regénérées à chaque rendu)
+Art_Source/Preview/_tmp/
+
 # Worktrees temporaires des tâches Claude Code
 .claude/worktrees/
