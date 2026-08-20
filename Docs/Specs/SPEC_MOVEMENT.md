@@ -285,9 +285,10 @@ que par les pentes, proportionnellement à leur inclinaison.
 
 ```
 SLIDESTEP(dt)                                            ← ordre réel, écritures en dernier
+  UpdateSlideHeading(dt, aim)                            ← [0a] CAP LISSÉ (D53), exec, AVANT tout
   spd      = |Velocity.XY|
   curYaw   = MakeRotFromX(Velocity.XY).Yaw
-  tgtYaw   = MakeRotFromX(Character.GetActorForwardVector()).Yaw       ← [0] VIRAGE
+  tgtYaw   = MakeRotFromX(SlideHeadingDir).Yaw                         ← [0] VIRAGE (D53)
   newYaw   = RInterpToConstant(curYaw, tgtYaw, dt, Slide_TurnRate).Yaw
   turned   = GetForwardVector(newYaw) * spd                            ← norme conservée
   N        = GetFloorNormal()
@@ -381,6 +382,49 @@ demandé au playtest. Le reste du modèle est inchangé : rotation à `Slide_Tur
 
 `Slide_EntryBoost` est passé à **0** dans `DA_Movement_Default`. La clé et le nœud
 `AddSpeedGain` restent en place : c'est un bouton disponible, pas du code mort.
+
+### `D53` — le slide suit un **cap lissé**, pas le regard instantané (J8bis, 2026-08-20)
+
+> Retour de Louis, une fois le laser en main : *« comme le slide est orienté avec la souris,
+> quand on veut viser en slidant ça nous fait tourner »*.
+
+`D26` reste intact — ce qui change, c'est **la cible** que vise la rotation du vecteur vitesse.
+Le slide ne suit plus le regard **instantané** mais un **cap** `SlideHeadingDir`, filtre passe-bas
+**vectoriel** de la cible de `D31` :
+
+```
+ENTRÉE DE SLIDE — InitSlideHeading()          ← appelée en fin de StartSlide
+  flat            = (Velocity.X, Velocity.Y, 0)
+  n               = Normalize(flat)                       ← nul si Velocity.XY ≈ 0
+  SlideHeadingDir = |n| > 0.5 ? n : ActorForwardVector    ← repli sur le regard à l'arrêt
+
+CHAQUE FRAME DE SLIDE — UpdateSlideHeading(dt, AimDir)    ← 1ᵉʳ nœud exec de SlideStep
+  target          = Normalize( (AimDir.X, AimDir.Y, 0) )  ← AimDir = la cible D31 (regard + strafe)
+  SlideHeadingDir = Normalize( VInterpTo(SlideHeadingDir, target, dt, Slide_HeadingFollowSpeed) )
+```
+
+**Pourquoi ça règle le problème.** Un coup d'œil bref pour viser puis retour est une excursion qui
+s'annule : intégrée par le filtre, elle ne déplace presque pas le cap. Une direction **tenue** est
+une consigne soutenue : le cap converge et le slide tourne exactement comme avant. Pas de zone
+morte, pas de seuil, pas de mode caché — un lissage continu, un seul curseur.
+
+**Le lissage est vectoriel, jamais angulaire.** Un `RInterpTo` sur un yaw flottant casserait au
+passage ±180° : viser derrière soi ferait faire au joueur un tour complet. `VInterpTo` +
+normalisation n'a pas ce défaut. **Ne jamais réécrire ce filtre en angles.**
+
+**`SlideHeadingDir` ne dérive jamais hors slide.** Sa seule mise à jour vit dans `SlideStep`, qui
+n'est atteint que par `UpdateSlidePhysics` — un `switch` sur `CurrentState` dont les pins `Dashing`
+et `WallRiding` **ne sont branchés à rien** (`D42`, `12_PIEGES §6.13`). Pendant un dash ou un wall
+ride le cap est donc **gelé**, comme le reste du slide, et retrouvé intact à la reprise
+(`RestoreStateAfterDash`). Le dash durant `Dash_Duration` = 0.16 s, la péremption est bornée.
+
+**Ce qui n'a PAS bougé** : `Slide_TurnRate` (720 °/s), la conservation stricte de la norme,
+`CrouchStep` (`D29`), le plancher anti-softlock `bForcedSlide` (`D27`), la cible `regard + strafe`
+de `D31` — c'est elle qui alimente le filtre, donc `Q`/`D` infléchissent toujours la trajectoire.
+
+**Nouveau curseur** : `Slide_HeadingFollowSpeed` = **2.5 /s** (`07_TUNING §5`, `[À CALIBRER]`).
+Le monter rapproche du comportement `D26` pur (le slide colle au regard) ; le baisser rend le slide
+plus « lourd » et la visée plus libre. À `+∞` on retrouve exactement l'ancien modèle.
 
 ### 4.1 bis — Écarts d'implémentation (J4, 2026-08-19)
 
@@ -755,6 +799,7 @@ Vérifié en PIE : 2500 uu/s injectés en vol sont intacts à l'atterrissage (`P
 ```
 TryDash()                                     ← appelé par IA_Dash (Triggered + Started)
  [1] GARDES : CanDash() = bTuningCached ET NOT bIsDashing ET DashCharges > 0
+              ET ( NOT Dash_RequiresSurfaceTouch OU bSurfaceTouchedSinceDash )     ← D57
         **Le dash n'interrompt RIEN.** Il ne coupe pas le slide, ne dé-crouche pas, ne touche
         à aucun réglage du CMC autre que les plafonds de vitesse. C'est une parenthèse (D42).
  [2] DIRECTION — ComputeDashDir() :
@@ -789,7 +834,37 @@ TryDash()                                     ← appelé par IA_Dash (Triggered
  [7] CHARGES : décrémentée à [1]. ChargeTimer = Dash_Cooldown à chaque dash.
         UpdateCharges(dt) décompte et rend une charge, se réarme tant que DashCharges < MaxCharges.
         Upgrade `DashRechargeOnKill` : décrémente le timer, ne donne pas de charge instantanée
+ [8] CONTACT DE SURFACE (D57) — bSurfaceTouchedSinceDash :
+        StartDash le met à false                       ← le dash CONSOMME le contact
+        UpdateSurfaceTouch(), tête de TickDash :
+              si CMC.IsMovingOnGround() ET NOT bIsDashing → true
+        Event HandleWallRideStarted (abonné à BPC_WallRide.OnWallRideStarted au BeginPlay) → true
+        Défaut du composant : true — on démarre une partie avec son dash
 ```
+
+**D57 — un seul dash par contact de surface.** Le cooldown seul laissait enchaîner les dashs en
+plein vol (« on peut limite voler en spammant les dash », Louis, J8quinquies). La charge est
+désormais rendue quand **les deux** conditions sont vraies : `Dash_Cooldown` écoulé **ET** une
+surface touchée depuis le dernier dash. La clé `Dash_RequiresSurfaceTouch` (`07_TUNING §8`) permet
+de revenir au comportement d'avant sans toucher au graphe.
+
+Trois points de conception qui ont leur importance :
+
+- **Le gel du contact pendant le dash** (`NOT bIsDashing` dans `UpdateSurfaceTouch`) est ce qui
+  empêche un dash déclenché **depuis le sol** de se recréditer tout seul au frame même où il part.
+  Sans ce test, un dash vers le ciel serait re-crédité avant que le joueur n'ait quitté le sol.
+- **Courir puis sauter ne coûte rien** : le drapeau n'est mis à `false` que par `StartDash`.
+  Un joueur qui sort du sol sans avoir dashé garde son dash — coyote time compris.
+- **La charge et le drapeau sont deux choses distinctes.** `UpdateCharges` est **inchangée** : en
+  l'air, `DASH charges` peut afficher `1/1` alors que `TryDash` est refusé. C'est la garde d'entrée
+  qui bloque. Si ce décalage d'affichage gêne en playtest, deux réponses possibles — ajouter le
+  drapeau à la ligne `DASH` de l'overlay, ou conditionner la régénération de charge au drapeau —
+  **aucune des deux n'est implémentée**, elles attendent l'avis de Louis.
+
+Le composant lit `CMC.IsMovingOnGround()` et **rien d'autre** : `BPC_Dash` tick en dernier (D32),
+il ne consomme donc que des états moteur, jamais un cache d'un autre composant
+(`12_PIEGES_OUTILLAGE §6.12`). Le contact mural passe par le **dispatcher** `OnWallRideStarted`,
+pas par une lecture de `BPC_WallRide` — pas de dépendance d'ordre de tick.
 
 **Ordre de tick — `BPC_Dash` s'exécute APRÈS `BPC_MovementState`**, c'est-à-dire l'inverse de
 `BPC_Slide` (`§7.4`, `12_PIEGES_OUTILLAGE §6.1`). Raison : le dash doit avoir le **dernier mot** sur la
@@ -871,12 +946,13 @@ IsValidWall(Hit)
 | Phase | Comportement |
 |---|---|
 | Accroche | `RequestState(WallRiding)` · `SetMovementMode(MOVE_Flying)` · **`Velocity.Z = WallRide_UpwardBoost`** (valeur absolue, pas un `+=` : on s'attache **à l'horizontale**, **D47**) · roulis caméra `WallRide_CameraTilt` vers l'extérieur (**D49**) |
-| Maintien (par frame) | `WallDir = Cross(Hit.Normal, WorldUp)` orienté par `Dot(WallDir, HorizVel)` · `Velocity.XY = WallDir * RideSpeed`, avec `RideSpeed *= WallRide_SpeedRetention^dt` · `Velocity.Z += GetGravityZ × WallRide_GravityScale × dt` (le CMC n'applique **aucune** gravité en `MOVE_Flying`) · coller au mur : composante de `Velocity` le long de `-Normal` = 0 · re-trace chaque intervalle pour confirmer le mur |
+| Maintien (par frame) | `WallDir = Cross(Hit.Normal, WorldUp)` orienté par `Dot(WallDir, HorizVel)` · `Velocity.XY = WallDir * RideSpeed`, avec `RideSpeed *= WallRide_SpeedRetention^dt` · `Velocity.Z += GetGravityZ × WallRide_GravityScale × dt` (le CMC n'applique **aucune** gravité en `MOVE_Flying`) · coller au mur : composante de `Velocity` le long de `-Normal` = 0 · re-trace chaque intervalle pour confirmer le mur, **le long de `-WallNormal` mémorisée, jamais le long d'un vecteur de l'acteur** (**D54**) |
 | Sortie — durée | `WallRide_MaxDuration` écoulé → `Falling`. **`MaxDuration = 0` désactive cette sortie** (accroche illimitée, **D47**) |
 | Sortie — sol | trace vers le bas de `Capsule_HalfHeight + MaxStepHeight` → `Falling` (**D45**) |
-| Sortie — plus de mur | Trace négative 2 évaluations consécutives (anti-flicker sur les joints de modules) → `Falling` |
+| Sortie — plus de mur | Trace négative 2 évaluations consécutives (anti-flicker sur les joints de modules) → `Falling`. Raison : `NoWall` |
 | Sortie — saut | `IA_Jump` → **Wall Jump** (§9.3) |
-| Sortie — input opposé | `Dot(WishDir, Hit.Normal) > 0.7` maintenu ≥ 0.1 s → décrochage volontaire, `Falling`, conserve la vitesse |
+| Sortie — input opposé | `Dot(WishDir_repère_mur, Hit.Normal) > WallRide_DetachDotThreshold` maintenu ≥ `WallRide_DetachHoldTime` → décrochage volontaire, `Falling`, conserve la vitesse. Raison : **`InputAway`**. `WishDir_repère_mur = normalize( WallDir × MoveInput.Y + Cross(WorldUp, WallDir) × MoveInput.X )` — **repère du mur, pas repère du regard** (**D55**) |
+| Sortie — regard retourné | `Dot( normalize(CameraForward.XY), WallDir ) < cos(WallRide_DetachLookAngle)` → `Falling`. Raison : **`LookAway`**. Immédiat, sans temps de maintien (**D56**) |
 | Dans tous les cas | `LastWallComponent = Hit.Component` · `LastWallDetachTime = Now` · `SetMovementMode(MOVE_Falling)` · reset `GravityScale = Gravity` · reset du roulis caméra |
 
 ### 9.3 Wall Jump
@@ -908,10 +984,14 @@ Murs opposés → alternance libre (c'est le combo recherché, cf. 07_TUNING §1
 
 ### 9.4 État réel au J6 (2026-08-19) — divergences assumées
 
-`BPC_WallRide` : **45 variables, 21 fonctions**, tick **après** `BPC_MovementState`
+`BPC_WallRide` : **46 variables, 21 fonctions**, tick **après** `BPC_MovementState`
 (`AddTickPrerequisiteComponent` depuis son propre `BeginPlay`, patron `BPC_Dash` / **D32**).
 Chaîne de sortie : `WallRideStepIfActive → WallRideStep → CheckGrounded → CheckDuration →
 CheckWallContact → ConfirmWall → CheckDetachInput`.
+`CheckDetachInput` porte **les deux** décrochages volontaires : d'abord `LookAway` (regard), puis
+`InputAway` (touche latérale). Un seul `EndWallRide` peut partir par frame — les deux tests sont
+imbriqués dans le même arbre de branches, jamais séquentiels (sinon la raison de sortie serait
+écrasée par la seconde).
 
 | # | Divergence | Pourquoi |
 |---|---|---|
@@ -922,6 +1002,9 @@ CheckWallContact → ConfirmWall → CheckDetachInput`.
 | **D47** | **Le wall ride est horizontal, illimité et à vitesse strictement constante.** `MaxDuration = 0` (pas de sortie par durée) · `GravityScale = 0` (altitude verrouillée) · `UpwardBoost = 0` (accroche à plat, `Velocity.Z` mis à **0** et non `+=`) · `SpeedRetention = 1.0` (ni gain ni perte). | **Playtest J6 de Louis** : « j'aimerais vraiment ce sentiment quand on touche le mur, on s'y attache à l'horizontale dessus et on court sans gagner ni perdre de la verticalité », « un temps d'accroche infini », « on ne gagne ni en speed ni on en perd ». Le modèle « glisse lente qui s'épuise » de la spec d'origine punissait le joueur pour être resté sur le mur ; le modèle validé fait du mur **un sol vertical**. Les 4 clés restent actives : remettre `0.25` / `2.0` restaure l'ancien comportement sans toucher au Blueprint. |
 | **D48** | **Le wall jump part dans la direction du regard** (§9.3), et il monte plus haut qu'un saut normal. | Cf. §9.3. |
 | **D49** | **Roulis caméra câblé.** `UpdateCameraTilt` tourne à **chaque** tick (pas seulement pendant le ride, sinon le retour à 0 ne se ferait jamais) : `FInterpTo` vers `−WallSide × WallRide_CameraTilt` à `WallRide_CameraTiltSpeed`, appliqué via `Controller.SetControlRotation` en ne touchant **que** le `Roll`. | `bUsePawnControlRotation = true` fait que `UCameraComponent::GetCameraView` écrase la rotation monde de la caméra par la `ControlRotation` — un `SetRelativeRotation` sur la caméra est donc effacé chaque frame. La seule voie sans refactor (SpringArm, composant intermédiaire) est de poser le roulis **dans la `ControlRotation` elle-même**. Le pitch et le yaw sont relus et réécrits à l'identique : aucun input perdu. `bUseControllerRotationYaw` seul étant coché, le roulis n'affecte **pas** le mouvement. **Vérifié en PIE** : `CameraRollCurrent = 0.3699` → roulis réel de la caméra `0.3703`. Le signe se pilote par la clé : une valeur **négative** inverse le sens. |
+| **D54** | **La trace de maintien (`ConfirmWall`) part le long de `-WallNormal` mémorisée, plus le long de `ActorRightVector × WallSide`.** Portée inchangée (`Capsule_Radius + WallRide_DetectDistance` = 104 uu). `WallSide` reste utilisée par `DetectWall` (l'accroche, actor-relative par nature) et par le roulis caméra (**D49**). | `bUseControllerRotationYaw = true` : l'acteur tourne avec la caméra. La trace de maintien suivait donc le regard et **sortait du mur dès qu'on tournait la tête** (≈ 67° avec un standoff de 40 uu) → `MissedTraces` atteignait `WallRide_MissedTraceTolerance` en 0.06 s → sortie **`NoWall`**. Depuis le J8 il y a une arme : viser sur le côté décrochait. La normale du mur est rafraîchie à chaque trace réussie et **ne dépend d'aucune orientation du joueur** — c'est la seule référence stable. |
+| **D55** | **Le décrochage par input se juge dans le repère du MUR, pas dans le repère du regard.** `WishDir = normalize( WallDir × MoveInput.Y + Cross(WorldUp, WallDir) × MoveInput.X )`, puis `Dot(WishDir, WallNormal) > WallRide_DetachDotThreshold`. Seuil retuné **0.7 → 0.5**. | L'implémentation J6 construisait `WishDir` sur la base **caméra** (`CameraForward.XY × MoveY + CameraRight.XY × MoveX`) — le même vecteur monde que l'air strafe. Conséquence : en tenant `Z` (le réflexe pendant un ride), tourner la tête de **30°** suffisait à faire `Dot(WishDir, Normal) = sin(30°) = 0.5` → décrochage. Le correctif de la trace (**D54**) n'aurait donc rien réglé tout seul : le joueur se serait encore décroché en visant. Dans le repère du mur, `D` seul donne `dot = ±1`, `Z+D` donne `±0.707`, `Z` seul donne `0` — **exactement la règle que Louis décrit, et indépendante du regard**. ⚠️ Écart assumé avec la consigne « lis le `WishDir` de l'air strafe, ne le recalcule pas » : ce `WishDir`-là est précisément la cause du bug. |
+| **D56** | **Nouvelle sortie nommée `LookAway`** : `Dot( normalize(CameraForward.XY), WallDir ) < cos(WallRide_DetachLookAngle)`, avec `WallRide_DetachLookAngle = 90°`. Immédiate, sans temps de maintien. Cosinus **précalculé au `BeginPlay`** dans `TuneDetachLookCos`, patron `Tune_AirStrafeGainAngleCos` (J3). | Louis : « il faudrait pas pouvoir se décrocher tant qu'on ne regarde pas à plus de 90 degrés. Au moins qu'on puisse regarder à droite si on est sur un mur, pour pouvoir tirer en étant en wall ride. » En deçà de 90°, **plus aucune condition ne décroche au regard** ; au-delà (regard retourné vers l'arrière), le décrochage est volontaire et lisible. Comparaison sur des **vecteurs aplatis XY normalisés**, jamais sur des yaw bruts : le passage ±180° casse toute soustraction d'angle (leçon **D53**). Regarder droit en haut ou droit en bas donne un `CameraForward.XY` quasi nul → `Normalize` renvoie `(0,0,0)` → `dot = 0 > cos(90°)` → **pas de décrochage**, comportement voulu. |
 | — | `EndWallRide(Reason, bRestoreState)` prend un **drapeau de restitution d'état**. À `false` (perte d'état, dash, wall jump) elle remet `MOVE_Falling`, arme `SameWallCooldown` et rend la main **sans** appeler `RequestState` — sinon elle sortirait le joueur du dash qui vient de prendre l'état. | Corollaire de **D42**. |
 | — | Pendant le ride, la vitesse vit dans **`RideSpeed`** (variable du composant), pas dans `CMC.Velocity` relue chaque frame. `CMC.Velocity` n'est lue **qu'à l'entrée** (`StartWallRide`) et pour la composante Z. | Piège **6.13** : `ApplyMomentumDecay` (qui tourne avant nous) met la vélocité à l'échelle. Une mécanique qui possède la vélocité doit la posséder **exclusivement**. |
 
@@ -957,6 +1040,22 @@ désactivée. Roulis : `CameraRollCurrent = 0.3699` → roulis réel de la camé
 **Non vérifiés en headless : le wall jump (§9.3) et le décrochage volontaire** — ils exigent un input
 **pendant** le ride, que `PressKey` ne peut pas placer (piège 4.4 : un aller-retour MCP fait avancer
 ~20 s de temps de jeu, et piège 4.12 : on ne peut pas ralentir PIE par outil).
+
+**2026-08-20, après D54/D55/D56** (zone E2, mur `Y = +500`, injection à `(−6500, 370, 500)`,
+vélocité `(2400, 250, 0)`) :
+
+| Test | Regard vs déplacement | Résultat |
+|---|---|---|
+| Clés lues sur l'instance PIE | — | `TuneDetachLookCos = 6.123234e-17` (= `cos 90°` exact), `TuneDetachDot = 0.5`, `bTuningCached = true` |
+| Ride tête alignée | 0° | `WallNormal = (0,−1,0)`, `WallDir = (1,0,0)`, `EntrySpeed = RideSpeed = 2412.9857` (conservation exacte, **D47** intact), **`MissedTraces = 0` sur 5500 uu**, sortie **`NoWall`** en bout de mur |
+| Ride tête retournée | 180° | sortie **`LookAway`** dès la première évaluation |
+
+**Toujours pas vérifiable en headless : `InputAway`.** `BPC_MovementState.CachedMoveInput` est
+**lisible mais pas inscriptible** (elle n'est pas `Instance Editable`, piège 4.8), et
+`AController::ControlRotation` n'est **ni lisible ni inscriptible** par `ObjectTools` — impossible
+d'orienter la tête pendant un ride, donc impossible de produire un décrochage à un angle choisi
+autrement qu'en fixant le yaw au spawn. Le mapping des axes est en revanche **prouvé
+topologiquement** : `MoveInput.Y` multiplie `WallDir`, `MoveInput.X` multiplie `Cross(WorldUp, WallDir)`.
 
 ---
 
@@ -1013,6 +1112,7 @@ Anti-spam : deux `Event Hit` sur le même composant à moins de 0.2 s → une se
 | **Collision frontale pendant Dash** | Le dash est interrompu (seul cas d'annulation). Pénalité §10 appliquée. |
 | **Dash au sol vers le haut** | Impossible si `Dash_ZLockOnGround` : `DashDir.Z` forcé à 0. Sauter d'abord. |
 | **2 dashs consécutifs** | Uniquement si `Dash_MaxCharges >= 2` (upgrade). Sinon refusé, aucun feedback trompeur : son « no charge » distinct. |
+| **2 dashs dans le même saut** | **Refusé (D57)**, quel que soit `Dash_MaxCharges` : il faut avoir touché le sol **ou** accroché un wall ride entre les deux. Un wall ride au milieu d'un vol rend donc le dash immédiatement (le dispatcher `OnWallRideStarted` réarme le drapeau au frame de l'accroche), sous réserve que `Dash_Cooldown` soit écoulé. |
 
 ---
 

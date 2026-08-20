@@ -1,5 +1,18 @@
 # 2026-08-18 — Mesh du pistolet laser (`SM_Weapon_LaserPistol`)
 
+> ## ⚠️ CORRECTION AJOUTÉE LE 2026-08-20 (J8) — l'orientation annoncée ci-dessous est FAUSSE
+>
+> Ce journal dit « canon vers −Y Blender → **+X** dans UE » et situe `SOCKET_Muzzle` à `(0 ; −22,5 ; 5,0)`.
+> **Mesuré dans UE au J8**, les bounds de l'asset importé sont `X 6.1 × Y 30.0 × Z 14.9`, bouche du canon
+> à **`Y = +22.1`**. La longueur du pistolet est donc sur **`+Y`**, pas sur `+X` — c'est l'inversion Y de
+> Blender→FBX→UE (`12_PIEGES §5.13`), qui a été décrite comme une *intention d'export* et jamais vérifiée
+> après import.
+>
+> Conséquences payées au J8 : l'arme visait **à droite de l'écran**, et le composant `Muzzle` avait été
+> posé à `(22.5, 0, 5)` — sur le **flanc** du pistolet au lieu du bout du canon.
+> Corrigé par `yaw = −90°` sur `ChildActor_Laser` et `Muzzle` à `(0 ; 22.5 ; 5)` en espace mesh.
+> Détail et parade : `12_PIEGES §5.24`. **Ne pas se fier au tableau ci-dessous pour orienter l'arme.**
+
 > **v2 — reconstruction complète.** La v1 était trop « pistolet » : corps trop haut,
 > poignée trop longue et trop reculée. Reconstruit sur des ratios mesurés sur la
 > planche de référence. Voir §« Reconstruction v2 » en bas.

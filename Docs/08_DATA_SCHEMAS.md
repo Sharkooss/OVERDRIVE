@@ -217,9 +217,24 @@ Instance : `DA_Weapon_Laser`. Valeurs : `Docs/07_TUNING.md §11`.
 | `Range` / `FireCooldown` / `TraceRadius` / `RecoilPitch` | Float |
 | `HeatMax` / `HeatPerShot` / `HeatDecayRate` / `HeatDecayDelay` | Float |
 | `OverheatDuration` / `OverheatExitThreshold` / `OverheatDecayMultiplier` | Float |
-| `HeatWarningThreshold` | Float |
-| `TraceChannel` | Trace Type Query |
-| VFX/SFX (muzzle, beam, impact, headshot, overheat) | soft refs |
+| `HeatWarningThreshold` / `HeatTickInterval` | Float |
+| `RecoilReturnInterpSpeed` | Float |
+| ~~`TraceChannel`~~ | **retiré au J8** — voir ci-dessous |
+| `MuzzleVFX` / `BeamVFX` / `ImpactVFX` / `HeadshotImpactVFX` | `NiagaraSystem` (ref **dure**) |
+| `FireSFX` / `ImpactSFX` / `HeadshotSFX` / `DenySFX` | `SoundBase` (ref **dure**) |
+
+> **État réel au J8 : 25 propriétés `Instance Editable`**, créées par outil et relues une par une.
+> Trois écarts assumés par rapport à la liste d'origine, tous documentés ici :
+> - **`TraceChannel` n'existe pas.** Aucun outil ne sait créer une variable typée enum
+>   (`12_PIEGES §5.2`), et `ETraceTypeQuery` en est une. Le canal `Weapon` est posé en **littéral
+>   sur le pin** du nœud de trace, ce que `set_pin_value` sait faire. Ce n'est pas une valeur de
+>   gameplay mais une constante de câblage : elle ne relève pas de R3. À rajouter à la main le jour
+>   où une seconde arme aurait besoin d'un autre canal.
+> - **`HeatTickInterval` et `RecoilReturnInterpSpeed` ont été ajoutés** : ces deux clés existaient
+>   dans `07_TUNING §11` sans hôte. Toutes les clés du §11 ont désormais un champ.
+> - **Les refs VFX/SFX sont dures, pas soft.** `add_object_variable` ne produit que des refs dures.
+>   Sans conséquence à cette échelle — le DataAsset d'arme est chargé en permanence. À revoir si le
+>   budget mémoire le demande, jamais avant.
 
 ### `PDA_MovementData`
 Instance unique : `DA_Movement_Default`. **Miroir exact de `Docs/07_TUNING.md §2–§10.**

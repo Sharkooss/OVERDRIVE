@@ -372,6 +372,85 @@ Sur fond clair, un émissif faible est **invisible**. Intensités de référence
 `1.0` décor · `3.0` signalétique · `8.0` surfaces de traversée · `15.0` laser et VFX.
 **Un émissif ne remplace jamais une valeur foncée pour signaler un objet proche** (§3.1).
 
+### 6.4 Matériaux de l'arme FP — `M_Weapon_Base` (créé le 2026-08-20, en avance sur le J22)
+
+**Master : `Content/OVERDRIVE/Art/Materials/Master/M_Weapon_Base`**
+`Material Domain = Surface` · `Blend Mode = Opaque` · `Shading Model = Default Lit` · aucune texture,
+aucune normal map. Volontairement minimal — 6 expressions, 5 paramètres :
+
+| Paramètre | Type | Groupe | Défaut | Branché sur |
+|---|---|---|---|---|
+| `BaseColor` | Vector | `01 - Surface` | `0.215861` gris neutre | `MP_BaseColor` (sortie RGB) |
+| `Metallic` | Scalar | `01 - Surface` | `0.0` | `MP_Metallic` |
+| `Roughness` | Scalar | `01 - Surface` | `0.7` | `MP_Roughness` |
+| `EmissiveColor` | Vector | `02 - Emissive` | `#FF1025` linéaire | `× EmissiveIntensity` → `MP_EmissiveColor` |
+| `EmissiveIntensity` | Scalar | `02 - Emissive` | `0.0` | idem |
+
+**Instances : `Content/OVERDRIVE/Art/Materials/Instances/`**, assignées aux 4 slots de
+`SM_Weapon_LaserPistol` dans cet ordre.
+
+> ⚠️ **Les valeurs à saisir sont les LINÉAIRES.** Les HEX sont donnés à titre de référence de
+> conception uniquement. Un paramètre `Vector` de matériau **n'est pas** un color picker sRGB :
+> y coller le HEX composante par composante donne une couleur délavée (`PALETTE.md §8.2`).
+> Conversion : `c ≤ 0.04045 ? c/12.92 : ((c+0.055)/1.055)^2.4`.
+
+| Slot | `MI_` | HEX sRGB (référence) | **BaseColor linéaire (à saisir)** | Rough | Metal | `EmissiveIntensity` |
+|---|---|---|---|---|---|---|
+| 0 `M_LaserPistol_Body` | `MI_Weapon_Body` | `#24282E` | `0.017642 / 0.021219 / 0.027321` | 0.65 | 0.55 | 0 |
+| 1 `M_LaserPistol_Panel` | `MI_Weapon_Panel` | `#1A1D22` | `0.010330 / 0.012286 / 0.015996` | 0.72 | 0.45 | 0 |
+| 2 `M_LaserPistol_Accent` | `MI_Weapon_Accent` | `#3A3F47` | `0.042311 / 0.049707 / 0.063010` | 0.55 | 0.65 | 0 |
+| 3 `M_LaserPistol_Emissive` | `MI_Weapon_Emissive` | `#FF1025` | `1.000000 / 0.005182 / 0.018500` | 0.60 | 0.00 | **8** `[À CALIBRER]` |
+
+`EmissiveColor` vaut `#FF1025` linéaire (`1.000000 / 0.005182 / 0.018500`) sur les **quatre** instances ;
+seule `EmissiveIntensity` distingue la bande lumineuse du reste.
+
+**`EmissiveIntensity = 8` est `[À CALIBRER]`** et c'est le seul réglage sensible : la scène est
+**éclairée en plein jour** (`11_ARBITRAGES D2`). Trop bas, l'émissif n'existe pas ; trop haut, le
+tonemapper + le bloom délavent la bande vers le blanc et **le rouge disparaît**. Point de départ aligné
+sur l'échelle §6.3 (`8.0` = surfaces de traversée). Fourchette de réglage attendue : 5 à 15.
+
+#### 6.4.1 ⚠️ Tension de palette à arbitrer par Louis — l'arme est rouge, son tir est magenta
+
+Trois sources se contredisent aujourd'hui :
+
+| Source | Ce qu'elle dit |
+|---|---|
+| `PALETTE.md §3` / `11_ARBITRAGES D3` | **Tout ce qui émane du joueur est `OD_Magenta_Player` `#E8336E`.** Le rouge appartient au **danger** (`OD_Red_Danger`) et aux **surfaces de traversée** (`OD_Red_Traversal`). |
+| `SPEC_ART_DIRECTION §8.2` | Arme : corps `OD_Navy_Deep`, panneaux `OD_Purple_Primary`, **bandes émissives `OD_Magenta_Player`**. |
+| **Demande de Louis, 2026-08-20** | Émissif **rouge `#FF1025`**, « que ça fasse laser gun ». Corps/panneaux en gris charbon, pas en navy/violet. |
+
+**Ce qui est implémenté : la demande de Louis (rouge).** La tension n'est pas tranchée, elle est signalée.
+
+Le problème concret, à vitesse de jeu : le **faisceau** du laser est magenta (`SPEC_COMBAT`,
+`OD_Magenta_Player`). L'arme annonce donc une couleur que son tir ne produit pas — et `#FF1025` est
+à moins de 10 % de teinte de `OD_Red_Danger` `#C81E2E` et de `OD_Red_Traversal` `#F4453F`, les deux
+couleurs qui signifient « ça va me tuer » et « je peux courir dessus ». Le risque n'est pas esthétique,
+il est de **lisibilité** : une source rouge saturée en permanence dans le champ de vision use le signal
+rouge du décor.
+
+Trois issues possibles, **au choix de Louis** :
+
+| Option | Conséquence |
+|---|---|
+| **A — Rouge, on assume** *(état actuel)* | Le plus proche du « laser gun » demandé. `PALETTE.md §3` gagne une exception explicite : « l'arme FP est la seule source rouge non-traversale du jeu ». Il faudra vérifier en playtest que les liserés rouges de wall ride restent lisibles avec le pistolet à l'écran. |
+| **B — Magenta `#E8336E`** | L'arme **annonce la couleur de son tir**, la règle D3 reste intacte, aucun coût : un `set_vector_parameter` sur `MI_Weapon_Emissive`. On perd le look « rouge chaud » demandé. |
+| **C — Dégradé rouge → magenta** | L'émissif part de `#FF1025` au repos et vire à `OD_Magenta_Player` au tir. Coût réel (pilotage par DMI), à ne pas payer avant que le reste soit joué. |
+
+Le changement A → B coûte **une valeur** dans `MI_Weapon_Emissive`. Rien n'est verrouillé.
+
+#### 6.4.2 Écarts assumés par rapport à §6.2 et §12.2
+
+`§6.2` impose `Metallic = 0` et `Roughness ∈ [0.6 ; 0.9]` — mais explicitement **« sur tout `MI_`
+d'environnement »**. `§12.2` généralise le `Metallic = 0` à tout le projet. Les valeurs demandées par
+Louis pour l'arme sont métalliques (0.45 à 0.65) et l'accent descend à `Roughness 0.55`.
+
+C'est **conservé tel quel**, pour une raison : l'arme est à ~40 cm de la caméra, elle est le seul objet
+du jeu qui bénéficie d'un highlight spéculaire — c'est précisément ce que §6.2 interdit dans le décor
+(« plastique mouillé » à 3000 uu/s), et ce qui fait lire un objet comme métallique en main.
+**À surveiller après activation de `PP_ToonPost`** : si le highlight spéculaire survit à la
+posterisation et fait scintiller l'arme en mouvement, descendre `Metallic` vers 0.2 et remonter
+`Roughness` au-dessus de 0.6. C'est le seul endroit du projet où `Metallic > 0` est toléré.
+
 ---
 
 ## 7. Modélisation
@@ -479,6 +558,12 @@ la key art en trois éléments seulement.
 - Matériau : `M_Player` → `MI_Player_Arms`. Un seul `MI_`.
 
 ### 8.2 L'arme (`SM_Weapon_LaserPistol`)
+
+> ⚠️ **Cette section décrit l'INTENTION v2. Les matériaux réellement posés le 2026-08-20 en
+> divergent** (gris charbon + émissif **rouge**, à la demande de Louis) : voir **§6.4** pour les
+> valeurs en vigueur et **§6.4.1** pour la tension de palette à arbitrer.
+> Tant que §6.4.1 n'est pas tranché, **c'est §6.4 qui décrit l'état du jeu**, pas ce paragraphe.
+
 Corps **`OD_Navy_Deep`**, panneaux **`OD_Purple_Primary`**, bandes émissives **`OD_Magenta_Player`**
 pilotées par `MPC_Global.HeatRatio` : elles virent progressivement vers `OD_Amber_Heat` à l'approche de
 l'overheat, puis clignotent en `OD_Red_Danger`. Afficheur de chaleur sur le flanc en `M_Sign`.

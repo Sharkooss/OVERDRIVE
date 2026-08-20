@@ -67,6 +67,11 @@ pour ressortir. C'est l'inverse de la contrainte de la v1 : ici, un élément bl
 | **Ma chaleur** | `OD_Amber_Heat` | jauge, overheat |
 | **Récompense** | `OD_Gold_Rank` | rank, coffre |
 
+> ⚠️ **Divergence ouverte, non arbitrée (2026-08-20)** — l'arme FP du joueur porte un émissif
+> **rouge `#FF1025`** et non `OD_Magenta_Player`, à la demande explicite de Louis. Le faisceau du
+> laser, lui, reste magenta. **La règle ci-dessus n'est pas modifiée** : l'écart est documenté et
+> chiffré dans `SPEC_ART_DIRECTION §6.4.1`, avec les trois options de sortie. À trancher par Louis.
+
 ### Pourquoi l'ennemi est orange et pas rouge
 
 Le rouge est pris par la traversée — c'est ce que montre la key art : les rails et les murs

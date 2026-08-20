@@ -385,10 +385,98 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 > **Objectif** : courir → tirer → headshot → melee → projeter un ennemi → dash → wall ride → continuer.
 
 ### J8 — Laser
-- [ ] `PDA_WeaponData` + `DA_Weapon_Laser`
-- [ ] `BP_LaserWeapon` : trace, origine caméra + VFX muzzle, dégâts, portée
-- [ ] Cibles de test dans le sandbox
-- [ ] **Test** : tirer en courant est naturel
+- [x] `PDA_WeaponData` + `DA_Weapon_Laser`
+- [x] `BPI_Damageable` (4 fonctions) + `S_DamageInfo` (8 champs) — assets créés à la main par Louis (5.16 / 5.17)
+- [x] Canal de trace `Weapon` = `ECC_GameTraceChannel3` → **`TraceTypeQuery3`** (prouvé, cf. journal)
+- [x] `BP_LaserWeapon` : `EventBeginPlay`, `TryFire`, `ResolveShot`, `ProcessHit`, `IsHeadshot`,
+      `PlayFireFX`, `EndFireCooldown` — hitscan depuis la caméra sur `ControlRotation` brute,
+      dégâts via `BPI_Damageable`, cooldown par `Set Timer by Event`
+- [x] `BP_PlayerCharacter` : `WeaponSpring` (SpringArm, montage **provisoire**) + `ChildActor_Laser`,
+      `IA_Fire` → `HandleFireInput` → `TryFire`, child actor mis en cache au `BeginPlay` (§13.11)
+- [~] Cibles de test dans le sandbox — `BP_TargetDummy` (`Dev/Sandbox/`, cube 60 × 60 × 180, `MaxHealth`
+      `Instance Editable`) et **7 instances placées** dans `L_Sandbox_Movement`, dossier `Sandbox/L_Targets` :
+      2 sur la ligne droite d'approche, 2 sur le deck 1 de la zone K, 1 sur le deck 3a après le wall jump,
+      2 dans le couloir de wall ride E2. Bases vérifiées **pile** sur leur surface (`get_actor_bounds`).
+      → Elles **bloquent déjà le canal `Weapon`** (collision par défaut), donc la ligne de tir s'y arrête :
+      la visée en course est testable tout de suite.
+      → ⏳ **Reste : cocher `BPI_Damageable` dans « Implemented Interfaces » de `BP_TargetDummy`** — geste
+      manuel, aucun outil ne le fait (`12_PIEGES §5.16`). `ApplyDamage` / `IsAlive` / `GetHealthRatio`
+      seront écrits par outil juste après.
+- [x] **Correctif game feel (retour de Louis manche en main)** — *« le laser ne part pas du muzzle du
+      pistolet si on se déplace, on a l'impression qu'il part depuis le vide, et le rayon disparaît
+      trop vite »*. `PlayFireFX` **arme** désormais le faisceau (`BeamEnd`, `BeamTimeRemaining`) au
+      lieu de le dessiner ; `UpdateBeam(DeltaSeconds)` — seul contenu d'un `EventTick` **dérogatoire
+      et provisoire** — le redessine chaque frame depuis le muzzle **courant**, avec un alpha qui
+      décroît. `LaserDebug_LineDuration` (0.06 s, ligne figée) **remplacée** par
+      `LaserDebug_BeamDuration` = 0.12 s. Dérogation de Tick écrite dans `SPEC_COMBAT §2`,
+      **à retirer au J14** avec `NS_LaserBeam`.
+- [x] **Correctif game feel n°2 (retour de Louis manche en main, J8bis)** — *« il faut que quand on tire
+      ça parte exactement du muzzle du canon puis ensuite il se détache pour rester en l'air là où on
+      a tiré, je ne veux pas de duplication »*, *« un effet beaucoup plus glowy »*, *« qu'il reste
+      encore un peu plus longtemps et fade un peu plus doucement »*. Relire le muzzle à **chaque**
+      frame produisait un éventail de segments (3 vivants à la fois × 32 uu de déplacement par frame
+      à 1900 uu/s) → **deux rayons divergents**. Correctif : nouvelle variable `BeamStart`, posée par
+      `PlayFireFX` puis entretenue par `UpdateBeam` **uniquement pendant `LaserDebug_AttachTime`**
+      (0.05 s), et **figée en espace monde ensuite** — accroche puis décrochage.
+      `LaserDebug_BeamDuration` 0.12 → **0.35 s**, fondu passé en **racine carrée**
+      (`alpha = sqrt(rem/dur)`), et faisceau doublé d'un **halo** concentrique
+      (`LaserDebug_GlowWidthMult` = 5.0, `LaserDebug_GlowAlphaMult` = 0.3, halo dessiné **avant** le
+      cœur, même `BeamStart`/`BeamEnd`). Les 3 clés neuves écrites sur le CDO **et** sur le
+      `ChildActorTemplate` (`12_PIEGES §5.27`), relevé sur l'instance PIE à l'appui.
+- [ ] **Test** : tirer en courant est naturel → **en attente du playtest de Louis (R8 / R10)**
+- [ ] **Test** : le faisceau part du canon même à 3000 uu/s, **ne se dédouble pas**, et s'efface en
+      fondu doux → **idem**
+
+- [x] **Correctif mouvement × combat (`D53`, tranché par Louis)** — *« comme le slide est orienté avec
+      la souris, quand on veut viser en slidant ça nous fait tourner »*. `BPC_Slide` seul : le virage
+      de `D26` ne vise plus le regard **instantané** mais un **cap lissé** `SlideHeadingDir`
+      (filtre passe-bas **vectoriel**, `VInterpTo` à `Slide_HeadingFollowSpeed` = 2.5 /s).
+      Nouvelles fonctions `InitSlideHeading` (entrée de slide, cap = direction de `CMC.Velocity`) et
+      `UpdateSlideHeading(dt, AimDir)` (1ᵉʳ nœud exec de `SlideStep`). `Slide_TurnRate`, la norme de la
+      vitesse, `D29`, `D31` et le plancher `bForcedSlide` (`D27`) **inchangés**. Clé ajoutée à
+      `PDA_MovementData` / `DA_Movement_Default` / `07_TUNING §5`.
+- [ ] **Test** : on peut viser à la souris en slidant sans être dévié, **et** garder le demi-tour
+      serré à 0.25 s quand on le veut → **en attente du playtest de Louis (R8 / R10)**
+
+- [x] **Correctif mouvement × combat n°2 (`D54` / `D55` / `D56`, J8quater)** — *« il faudrait faire en
+      sorte de pouvoir se décoller uniquement si on met la touche opposée au mur […] là on se décroche
+      aussi si on regarde sur le côté […] au moins qu'on puisse regarder à droite si on est sur un mur,
+      pour pouvoir tirer en étant en wall ride »*. Même conflit que `D53`, sur le wall ride.
+      **Deux causes indépendantes**, toutes deux corrigées : (1) `ConfirmWall` traçait le long de
+      `ActorRightVector × WallSide` — l'acteur tourne avec la caméra (`bUseControllerRotationYaw`),
+      donc la trace de maintien sortait du mur vers 67° → sortie `NoWall` ; elle part désormais le long
+      de **`-WallNormal`** mémorisée, portée inchangée (`12_PIEGES §6.21`). (2) `CheckDetachInput`
+      jugeait l'input sur un `WishDir` construit dans la **base caméra** — tenir `Z` et tourner la tête
+      de 30° suffisait à décrocher ; l'input est désormais reconstruit dans le **repère du mur**
+      (`12_PIEGES §6.22`). Sorties renommées et séparées : **`InputAway`** (touche latérale opposée,
+      seuil `WallRide_DetachDotThreshold` 0.7 → **0.5**) et **`LookAway`** (nouvelle, regard à plus de
+      `WallRide_DetachLookAngle` = **90°** de la direction de déplacement, cosinus précalculé au
+      `BeginPlay`). `Grounded` (`D45`), `WallJump` (`D48`), l'accroche illimitée (`D47`), le roulis
+      (`D49`), le cooldown same-wall et l'anti-héritage de vitesse de dash : **intouchés**.
+- [ ] **Test** : on peut viser à 90° pendant un wall ride **sans jamais décrocher**, et on décroche
+      **uniquement** avec la touche opposée au mur → **en attente du playtest de Louis (R8 / R10)**
+
+- [x] **Correctif mouvement n°3 (`D57`, J8quinquies)** — *« j'aimerais avoir le timer du dash oui, mais
+      aussi faire que sur un long saut on ne puisse pas spam les dash. Donc avoir qu'un seul dash, et
+      pour le récup il faut attendre le timer ET avoir touché une surface, donc sol ou wall ride. Car
+      là on peut limite voler en spammant les dash. »* `BPC_Dash` seul, en **amendement** : nouveau
+      drapeau `bSurfaceTouchedSinceDash`, mis à `false` par `StartDash`, remis à `true` par
+      `UpdateSurfaceTouch` (`CMC.IsMovingOnGround()` hors dash, en tête de `TickDash`) et par
+      l'abonnement au dispatcher **`OnWallRideStarted`** de `BPC_WallRide`. `CanDash` gagne une
+      condition, **rien d'autre n'est touché** : `Dash_Charges`, `Dash_Cooldown`, `UpdateCharges`,
+      `D30`, `D37`, `D38`, le gel du slide (`D39`/`D42`), le FOV kick, l'ordre de tick et
+      `CanEnterState` sont intacts. Clé `Dash_RequiresSurfaceTouch` (défaut `true`) dans
+      `PDA_MovementData` / `DA_Movement_Default` / `07_TUNING §8` — la mettre à `false` restaure
+      l'ancien comportement à l'identique.
+- [ ] **Test** : **un seul dash par saut**, récupéré au contact du sol **ou** d'un wall ride, et aucune
+      régression du J5 (slide → dash → slide, pas de blocage à 5625 uu/s) →
+      **en attente du playtest de Louis (R8 / R10)**
+
+> Reporté hors J8, volontairement : passe 2 de l'aide à la visée (`SPEC_COMBAT §11`,
+> `Laser_TraceRadius = 0` → serait du code mort non testable), `ApplyRecoil` (`§3.6`, exige un
+> `BP_PlayerCameraManager` custom → J14), gate heat (J9), gate health (J12),
+> `bUseMuzzleConfirmTrace` (`§3.4`, défaut `false`), decals / VFX d'impact décor (J14),
+> `IsHeadshot` réel (J10 — `HeadHitbox` n'existe nulle part, la fonction renvoie `false` en dur).
 
 ### J9 — Heat & overheat
 - [ ] `BPC_Heat` : machine à états, décroissance, délai, overheat, sortie
@@ -419,6 +507,11 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 - [ ] **Test** : un projectile est évitable à 3000 uu/s (Test 5)
 
 ### J14 — Premier passage de juice
+- [ ] **Dette J8 à solder** : `NS_LaserBeam` (World Space, positions figées à l'émission) remplace la
+      ligne de debug → supprimer `UpdateBeam`, l'`EventTick` de `BP_LaserWeapon`, les variables
+      `BeamStart` / `BeamEnd` / `BeamTimeRemaining` / `DebugBeamDuration` / `DebugDrawLifetime` /
+      `DebugAttachTime` / `DebugGlowWidthMult` / `DebugGlowAlphaMult` / `DebugLineThickness` / `DebugLineColor`,
+      et **repasser le Tick de l'arme à désactivé** (`SPEC_COMBAT §2`, dérogation provisoire).
 - [ ] FOV dynamique + `CF_FOVBySpeed`
 - [ ] Camera tilt, camera shakes `CS_*`
 - [ ] `NS_LaserImpact`, `NS_Muzzle`, `NS_Headshot`, `NS_EnemyDeath`, `NS_Dash`
@@ -484,6 +577,11 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 ### J22 — Finalisation Level 01
 - [ ] Passe de polish complète sur `L_W1_01`
 - [ ] Toon shader + matériaux appliqués
+      → **entamé en avance le 2026-08-20** : `M_Weapon_Base` + les 4 `MI_Weapon_*` de l'arme FP sont
+      créés et assignés aux 4 slots de `SM_Weapon_LaserPistol`
+      (`Docs/Journal/2026-08-20_Materiaux_Arme.md`, `SPEC_ART_DIRECTION §6.4`).
+      Restent au J22 : `PP_ToonPost`, `M_Env_Base`, `M_Env_Emissive`, `M_Sign`, `MPC_Global`.
+      ⚠️ Tension de palette (arme rouge / tir magenta) en attente d'arbitrage — `§6.4.1`.
 - [ ] `L_W1_01` sert de **référence de qualité** pour tous les autres
 
 ### J23 — Level 02

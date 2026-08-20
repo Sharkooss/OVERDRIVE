@@ -22,7 +22,37 @@ anim qui bloque le mouvement · TTK long · ennemi éponge (le Tank est un puzzl
 
 ## 2. `BP_LaserWeapon`
 `Content/OVERDRIVE/Weapons/Laser/` — **Child Actor Component** de `BP_PlayerCharacter` (`ChildActor_Laser`,
-socket `S_Weapon` de `SK_PlayerArms`). **Tick désactivé.**
+socket `S_Weapon` de `SK_PlayerArms`). **Tick désactivé** — sauf la dérogation ci-dessous.
+
+> ### ⚠️ Dérogation PROVISOIRE au « Tick désactivé » — J8, à retirer au J14
+>
+> Le Tick de `BP_LaserWeapon` est **activé** (`bCanEverTick` + `bStartWithTickEnabled`), pour **une
+> seule chose** : redessiner le faisceau de debug depuis la position **courante** du muzzle.
+>
+> **Pourquoi elle est nécessaire.** Louis, manche en main : *« le laser ne part pas du muzzle si on se
+> déplace, on a l'impression qu'il part depuis le vide, et le rayon disparaît trop vite. »* Les deux
+> demandes — origine toujours au canon **et** durée plus longue avec fondu — sont **contradictoires**
+> tant qu'on dessine une ligne figée en espace monde : à 3000 uu/s le canon parcourt ~50 uu par frame
+> pendant que la ligne reste sur place. La seule façon d'avoir les deux est de **redessiner le
+> faisceau à chaque frame**. C'est le piège 10 du §13, vécu.
+>
+> **Périmètre strict.** L'`EventTick` ne contient **qu'un** nœud d'appel : `UpdateBeam(DeltaSeconds)`.
+> Aucune logique de gameplay, aucune trace, aucun cast, aucun dispatcher n'y entre — jamais.
+> `UpdateBeam` ne fait que : entretenir `BeamStart` pendant la fenêtre d'accroche, dessiner
+> (halo + cœur) tant que `BeamTimeRemaining` est positif, et le décrémenter.
+>
+> **Correctif J8bis — accroche puis décrochage.** Redessiner en relisant le muzzle **à chaque frame**
+> pendant toute la vie du faisceau produisait un **éventail de segments** : à ~1900 uu/s le canon
+> bouge de ~32 uu par frame et chaque segment vit `LaserDebug_DrawLifetime` (≈ 3 frames). Louis,
+> manche en main : *« je vois deux rayons qui divergent depuis le point d'impact »*. La lecture du
+> muzzle est donc bornée à `LaserDebug_AttachTime` ; ensuite l'origine est **figée en espace monde**
+> et tous les redessins se superposent. Le faisceau est aussi passé à **0.35 s** avec un fondu en
+> **racine carrée**, et doublé d'un **halo** concentrique (un debug line ne peut pas émettre).
+>
+> **Date de péremption : J14.** Quand `NS_LaserBeam` existe (Niagara, **World Space, positions figées
+> à l'émission**, §13 piège 10), il remplace le dessin, `UpdateBeam` et l'`EventTick` sont supprimés,
+> les variables `BeamEnd` / `BeamTimeRemaining` / `DebugBeamDuration` avec, et le Tick repasse à
+> **désactivé**. Cette dérogation n'autorise **aucun** autre usage du Tick sur l'arme d'ici là.
 
 | Élément | Type | Rôle |
 |---|---|---|
@@ -36,9 +66,14 @@ socket `S_Weapon` de `SK_PlayerArms`). **Tick désactivé.**
 | `TryFire()` | Event | Point d'entrée unique depuis `IA_Fire` (§3) |
 | `ResolveShot()` | Function | Traces + point d'impact. **Aucun effet de bord.** |
 | `ProcessHit(Hit, bHeadshot)` | Function | Construit `S_DamageInfo`, appelle `BPI_Damageable` |
-| `PlayFireFX(ImpactPoint, Hit)` | Function | VFX/SFX/shake/recoil. **Aucune logique de gameplay.** |
+| `PlayFireFX(ImpactPoint, Hit)` | Function | VFX/SFX/shake/recoil. **Aucune logique de gameplay.** **Ne dessine plus le faisceau : il l'arme** (`BeamEnd` + `BeamTimeRemaining`, cf. §2 dérogation). |
 | `IsHeadshot(Hit)` | Pure | `Hit.Component == Cible.HeadHitbox` — **jamais** `Hit.BoneName` (§5.1) |
 | `EndFireCooldown()` | Event | Callback timer → `bCanFire = true` |
+| `BeamStart` | Vector, cat. `Debug`, **non** `Instance Editable` | **PROVISOIRE J8bis→J14.** Origine du faisceau. Posée à `Muzzle.GetWorldLocation()` par `PlayFireFX`, **réécrite chaque frame par `UpdateBeam` tant que `Elapsed < LaserDebug_AttachTime`**, puis **figée en espace monde**. C'est le décrochage qui supprime la duplication de rayons (§13 piège 10bis). |
+| `BeamEnd` | Vector, cat. `Debug` | **PROVISOIRE J8→J14.** Bout du faisceau, figé à l'émission : `Hit.ImpactPoint`, ou `Hit.TraceEnd` (= `Start + Dir × Range`) si le tir part à vide. |
+| `DebugAttachTime` / `DebugGlowWidthMult` / `DebugGlowAlphaMult` | Float ×3, cat. `Debug`, `Instance Editable` | **PROVISOIRE J8bis→J14.** Fenêtre d'accroche au canon, largeur et alpha du halo. Valeurs et sémantique : `07_TUNING §16`. |
+| `BeamTimeRemaining` | Float, cat. `Debug` | **PROVISOIRE J8→J14.** Temps de vie restant du faisceau. Armé à `LaserDebug_BeamDuration`, décrémenté par `UpdateBeam`. Laissé `Instance Editable` **à dessein** : c'est la sonde qui prouve que le Tick tourne en headless (`12_PIEGES §4.10`). |
+| `UpdateBeam(DeltaSeconds)` | Function | **PROVISOIRE J8bis→J14.** Seul contenu de l'`EventTick`. Si `BeamTimeRemaining > 0` : (1) `BeamStart = select(Elapsed < LaserDebug_AttachTime, Muzzle.GetWorldLocation(), BeamStart)` — accroche puis **décrochage** ; (2) dessine le **halo** (`thickness × GlowWidthMult`, `alpha × GlowAlphaMult`) ; (3) dessine le **cœur** (`thickness`, `alpha`) ; (4) **puis** décrémente. `alpha = sqrt(BeamTimeRemaining / LaserDebug_BeamDuration)` — **fondu en racine carrée, pas linéaire**. Durée de dessin = `LaserDebug_DrawLifetime`. **Les deux traits lisent la même `BeamStart` et la même `BeamEnd`** : deux origines différentes recréeraient la duplication. L'ordre compte : décrémenter avant de dessiner ferait démarrer le faisceau déjà entamé (`12_PIEGES §2.3b`). |
 | `OnShotFired(Hit, bHit)` | Dispatcher | → `BP_PlayerCharacter` → `WBP_HUD`, `BPC_StyleMeter` |
 | `OnHitConfirmed(Target, bHeadshot, bKilled)` | Dispatcher | → hitmarker, `BPC_StyleMeter`, `BPC_HitStop` |
 | `OnOverheatStarted` / `OnOverheatEnded` | Dispatchers | Relayés depuis `BPC_Heat` |
@@ -121,6 +156,19 @@ LineTraceByChannel(
   **Aucun `PHYS_Enemy_*` n'est produit**, et le per-bone tracing est interdit sur les ennemis : à 3000 uu/s
   de vitesse relative il est coûteux, imprécis, et dépendant de la topologie du mesh. Une sphère est gratuite,
   déterministe et se règle visuellement.
+> **Écarts constatés à l'implémentation (J8) — cette note fait foi sur le code réel.**
+> - Le canal `Weapon` est **`ECC_GameTraceChannel3`** et se pose sur le pin `TraceChannel` sous la
+>   valeur **`TraceTypeQuery3`** (prouvé, cf. `12_PIEGES_OUTILLAGE 5.18`).
+> - **`bReturnPhysicalMaterial` n'existe pas** sur le nœud Blueprint `Line Trace By Channel`
+>   (`UKismetSystemLibrary::LineTraceSingle` ne l'expose pas). Le pin `PhysMat` du `Break Hit Result`
+>   restera donc vide. Sans conséquence au J8 : il ne sert qu'au choix du VFX/SFX d'impact décor (J14).
+>   Si le J14 en a besoin, la parade Blueprint est un `Line Trace By Profile`/`ForObjects`
+>   ou la lecture du `PhysicalMaterial` du composant touché — **jamais** du C++ (R1).
+> - `ActorsToIgnore` contient **`[OwnerCharacter]`** seulement : `bIgnoreSelf = true` couvre déjà
+>   l'acteur arme, et un pin tableau ne se remplit pas en une passe (`12_PIEGES 2.22`).
+> - Signature réelle : **`PlayFireFX(Hit : HitResult, bBlockingHit : bool)`** — le point d'impact est
+>   relu du `Hit` (et `Hit.TraceEnd` sert de bout de ligne quand le tir part à vide).
+
 - **`bTraceComplex = false`** : le complex trace est coûteux et ne sert à rien ici — la discrimination
   corps / tête vient du **composant touché**, pas de la géométrie.
 - `bReturnPhysicalMaterial` ne sert qu'au choix du VFX/SFX d'impact sur le décor, jamais à la logique de hit.
@@ -592,7 +640,8 @@ mon rythme · [ ] j'ai voulu refaire un wall slam immédiatement après le premi
 | 7 | **`Simulation Generates Hit Events` = false** par défaut sur la capsule → aucun `Event Hit` pendant le knockback. | L'activer sur la capsule de `BP_EnemyBase`. |
 | 8 | **Tunneling** : un `Melee_Knockback` élevé peut traverser un mur fin. | `bUseCCD = true` sur la capsule ennemie ; murs d'au moins un module de grille (`06_CONVENTIONS §6`) ; `Speed_HardCap` respecté. |
 | 9 | **Double kill / double score** : melee + slam + projectile dans la même frame. | Garde `bIsDead` en **première ligne** de `TakeDamage` ; `bSlamConsumed` par vol. |
-| 10 | **Beam Niagara à durée non nulle** : reste visible alors que le joueur avance de ~50 uu par frame. | Durée ≤ 1 frame, ou beam en **World Space** avec positions figées à l'émission. |
+| 10 | **Beam Niagara à durée non nulle** : reste visible alors que le joueur avance de ~50 uu par frame. | Durée ≤ 1 frame, ou beam en **World Space** avec positions figées à l'émission. **Vécu au J8** sur la ligne de debug (`DrawDebugLine` en espace monde, 0.06 s) : Louis a rapporté un rayon *« qui part depuis le vide »*. Corrigé en redessinant le faisceau chaque frame depuis le muzzle courant (§2, dérogation de Tick). ⚠️ Corollaire mesuré dans la source moteur : pour `Draw Debug Line`, **`Duration <= 0` ne vaut PAS « une frame »** — le moteur retombe sur `ULineBatchComponent::DefaultLifeTime = 1.0 s`. Passer `DeltaSeconds`. Cf. `12_PIEGES §6.18`. |
+| 10bis | **Une origine de faisceau relue chaque frame produit un ÉVENTAIL, pas un rayon.** Le correctif du piège 10 (redessiner depuis le muzzle courant) a créé le bug inverse : chaque segment vit `LaserDebug_DrawLifetime` (0.05 s ≈ 3 frames) et le canon se déplace de ~32 uu par frame à 1900 uu/s → **3 segments d'origines différentes coexistent**, lus par le joueur comme *« deux rayons qui divergent depuis le point d'impact »* (Louis, manche en main, J8bis). Zéro erreur, zéro warning : les deux versions « fonctionnent ». | **Accroche puis décrochage.** Relire le muzzle **seulement** pendant `LaserDebug_AttachTime` (0.05 s), puis **figer l'origine en espace monde**. L'éventail résiduel de la fenêtre d'accroche est ce qui donne « ça part du canon » ; passé la fenêtre, tous les redessins se superposent au pixel près. Règle générale : **une origine mobile et une durée de vie de segment supérieure à une frame sont incompatibles** — il faut borner l'une des deux. |
 | 11 | **`Child Actor Component` null** si la référence est lue trop tôt. | `Get Child Actor` dans le `BeginPlay` du character après le parent, puis mise en cache. Jamais résolue en Tick. |
 | 12 | **`StopLogic` sans `ResumeLogic`** : un ennemi projeté dont la récupération ne se déclenche pas reste figé pour la partie. | `Knockback_MaxFlightTime` armé systématiquement ; `EndKnockbackWindow` appelé aussi depuis `Event Landed` et `OnDeath`. |
 | 13 | **Recoil via `AddControllerPitchInput`** : se cumule avec l'input souris, le retour auto se bat avec le joueur. | Recoil **caméra uniquement** (§3.6). |

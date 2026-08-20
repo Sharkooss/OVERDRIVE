@@ -179,7 +179,8 @@ que par slide-boost, dash, wall ride et bunny hop, et **décroît** si le joueur
 | `Slide_EntryBoost` | **0** | uu/s | À CALIBRER | **passé de 400 à 0 au J4** — le slide ne crée plus de vitesse sur le plat (`D24`). Reste un bouton si un petit coup de pouce s'avère nécessaire |
 | `Slide_HoldTime` | 1.0 | s | À CALIBRER | **durée pendant laquelle la vitesse est strictement conservée**, décroissance zéro. Se **réarme** dès qu'une pente fait ré-accélérer |
 | `Slide_SlopeMinSin` | 0.1 | sin(θ) | À CALIBRER | pente minimale (≈ 5.7°) pour qu'un slide démarre **sans condition de vitesse** |
-| `Slide_TurnRate` | 720 | °/s | À CALIBRER | **vitesse de virage du slide** : la vélocité pivote vers le regard à cette cadence. 720 = un **demi-tour en 0.25 s**. C'est *le* curseur de la mécanique |
+| `Slide_TurnRate` | 720 | °/s | À CALIBRER | **vitesse de virage du slide** : la vélocité pivote vers le **cap** (`SlideHeadingDir`) à cette cadence. 720 = un **demi-tour en 0.25 s**. C'est *le* curseur de la mécanique |
+| `Slide_HeadingFollowSpeed` | **2.5** | /s | **[À CALIBRER]** | vitesse du filtre passe-bas du **cap** de slide (option D, J8bis — `D53`). Plus haut = le slide colle au regard (retour au comportement `D26` pur, viser en slidant refait tourner) ; plus bas = slide plus « lourd », visée plus libre, virages voulus plus lents. `VInterpTo` sur un **vecteur**, jamais sur un yaw |
 | `Slide_MaxDuration` | 3.0 | s | ⛔ **INACTIVE** | ne met plus fin au slide (`D30`). Le compteur tourne encore et s'affiche dans l'overlay (`decay x / 3.00`), **à titre indicatif seulement** |
 | `Slide_Friction` | **0.15** | —/s | À CALIBRER | coefficient de décroissance exponentielle, **appliqué seulement après `Slide_HoldTime`**. **Passé de 0.4 à 0.15 au J4** : ça tombait trop vite, un long tunnel devenait infranchissable |
 | `Slide_ExitSpeedMin` | 1200 | uu/s | ⛔ **INACTIVE** | supprimée du code au J4 (`D30`) : on peut rester en slide **jusqu'à 0 uu/s** tant que la touche est tenue |
@@ -251,6 +252,27 @@ que par slide-boost, dash, wall ride et bunny hop, et **décroît** si le joueur
 > **Direction** : la cible du virage est `regard + strafe`, pas le regard seul —
 > `ActorForward × Move.Y + ActorRight × Move.X`, et le regard seul si l'input est nul.
 > `Q`/`D` infléchissent donc la trajectoire en plus de la souris (`D31`).
+>
+> ### `D53` — le slide suit un **cap lissé**, pas le regard instantané (J8bis)
+>
+> Depuis que le laser existe, **viser à la souris pendant un slide faisait tourner le joueur** :
+> le vecteur vitesse pivotait vers le regard *instantané* à `Slide_TurnRate`.
+>
+> Le slide suit désormais `SlideHeadingDir`, un **filtre passe-bas vectoriel** sur la cible de `D31` :
+>
+> ```
+> SlideHeadingDir = normalize( VInterpTo( SlideHeadingDir, normalize(aimXY), dt, Slide_HeadingFollowSpeed ) )
+> ```
+>
+> - **Entrée en slide** : `SlideHeadingDir` = direction horizontale normalisée de `CMC.Velocity`
+>   (repli sur le forward du regard si la vitesse horizontale est nulle) — le slide part *là où on va*.
+> - Un **coup d'œil bref** pour viser puis retour = excursion qui s'annule, le cap ne bouge presque pas.
+> - Un **virage voulu** (direction tenue) = le cap converge et le slide tourne comme avant, à `Slide_TurnRate`.
+> - **Pas de zone morte, pas de seuil, pas de mode caché.** Lissage continu.
+> - `Slide_TurnRate`, la norme de la vitesse et tout le reste de `D26` sont **inchangés**.
+>
+> ⚠️ Le lissage est **vectoriel**. Un filtre sur un yaw flottant casserait au passage ±180° :
+> viser derrière soi ferait faire un tour complet au joueur. Ne jamais réécrire ça en angles.
 >
 > La table d'états autorise `Idle → Sliding` et `Walking → Sliding` (`D23`) : le slide ne dépend
 > ni du sprint, ni de la vitesse.
@@ -338,6 +360,7 @@ et le strafe *apprenables* plutôt qu'aléatoires.
 | `Dash_Duration` | 0.16 | s | À CALIBRER | court et sec |
 | `Dash_Cooldown` | 1.4 | s | À CALIBRER | |
 | `Dash_MaxCharges` | 1 | — | À CALIBRER | upgrade peut monter à 2 |
+| `Dash_RequiresSurfaceTouch` | true | bool | **À CALIBRER (J8quinquies)** | **le cooldown ne suffit plus : il faut AUSSI avoir touché une surface (sol ou accroche wall ride) depuis le dernier dash** (**D57**). `false` restaure à l'identique le comportement d'avant : un dash disponible dès que `Dash_Cooldown` est écoulé, y compris en plein vol |
 | `Dash_SpeedRetention` | 1.0 | ratio | À CALIBRER | **conserve la vitesse horizontale (GDD §13)** |
 | `Dash_MinExitSpeed` | 1400 | uu/s | À CALIBRER | plancher de sortie |
 | `Dash_GravityScale` | 0.0 | ×G | **INACTIVE** | l'apesanteur est obtenue en réécrivant `Velocity` chaque frame, pas via `GravityScale` (**D31**) |
@@ -368,6 +391,17 @@ franchir, atteindre un mur. Si en playtest il paraît mou, augmenter `Dash_Dista
 > `StartDash` lit désormais `CMC.Velocity` directement. **Signalé par Louis au playtest J5** :
 > « en slidant et dashant tout le temps je suis constamment à 5625 uu/s ».
 
+> **D57 — un dash par contact de surface.** Le cooldown seul autorisait à enchaîner les dashs
+> pendant un saut long : « là on peut limite voler en spammant les dash » (Louis, J8quinquies).
+> La charge est désormais rendue quand **les deux** conditions sont vraies :
+> `Dash_Cooldown` écoulé **ET** `bSurfaceTouchedSinceDash == true`. Le drapeau tombe à `false`
+> dans `StartDash` (le dash **consomme** le contact) et repasse à `true` uniquement quand
+> `CMC.IsMovingOnGround()` est vrai hors dash, ou sur le dispatcher `OnWallRideStarted`.
+> ⚠ **`Dash_Cooldown` et `Dash_MaxCharges` sont inchangés** : la nouvelle règle est une **garde
+> d'entrée**, pas une modification du cycle de charge. Conséquence à connaître pour lire l'overlay :
+> en l'air, `DASH charges` peut afficher `1/1` alors que le dash est refusé — c'est le drapeau qui
+> bloque, pas la charge.
+
 ---
 
 ## 9. Wall ride
@@ -388,12 +422,18 @@ franchir, atteindre un mur. Si en playtest il paraît mou, augmenter `Dash_Dista
 | `WallRide_CameraTilt` | 12 | ° | **VALIDÉ 2026-08-19** | roulis **vers l'extérieur** — câblé au J6 (**D49**). Signe : `Roll = −WallSide × CameraTilt`. Une valeur **négative** inverse le sens |
 | `WallRide_CameraTiltSpeed` | 10 | /s | **VALIDÉ 2026-08-19** | **J6** — vitesse du `FInterpTo` du roulis, aller **et** retour |
 | `WallRide_TraceInterval` | 0.03 | s | À CALIBRER | fréquence des traces de détection (~33 Hz), **accumulateur dans le Tick** et non timer (**D43**) |
-| `WallRide_DetachDotThreshold` | 0.7 | — | **VALIDÉ 2026-08-19** | **J6** — `Dot(WishDir, Normal)` au-delà duquel l'input compte comme « je pousse loin du mur » (`SPEC_MOVEMENT §9.2`) |
-| `WallRide_DetachHoldTime` | 0.1 | s | **VALIDÉ 2026-08-19** | **J6** — durée de maintien avant décrochage volontaire |
+| `WallRide_DetachDotThreshold` | **0.5** | — | **⚠️ À CALIBRER (J8quater)** | `Dot(WishDir_repère_mur, Normal)` au-delà duquel l'input compte comme « je pousse loin du mur ». **Était `0.7` (VALIDÉ J6), passée à `0.5` au J8quater** : `Z+D` en diagonale exacte vaut `cos(45°) = 0.7071`, soit **1 % de marge** au-dessus de l'ancien seuil — Louis demande que `Z+D` décroche de façon fiable. `0.5` = **60° de tolérance**. Revenir à `0.7` est un changement d'une valeur (**D55**) |
+| `WallRide_DetachLookAngle` | 90 | ° | **À CALIBRER (J8quater)** | écart max entre le **regard aplati XY** et la **direction de déplacement le long du mur** avant décrochage (**D56**). En deçà, on peut viser librement — c'est ce qui permet de **tirer en wall ride**. Précalculée en cosinus au `BeginPlay` (`TuneDetachLookCos`), comparaison par `dot`, jamais par yaw brut (leçon **D53**) |
+| `WallRide_DetachHoldTime` | 0.1 | s | **VALIDÉ 2026-08-19** | **J6** — durée de maintien avant décrochage volontaire. **Ne s'applique qu'à `InputAway`** : la sortie `LookAway` est immédiate (**D56**) |
 | `WallRide_MissedTraceTolerance` | 2 | — | À CALIBRER | **J6** — évaluations négatives consécutives avant de lâcher le mur (anti-flicker sur les joints de modules) |
 
 Surfaces éligibles : object type **`WallRideSurface`** (cf. `Docs/06_CONVENTIONS.md §7`).
 Pas de wall ride sur les props ni sur les ennemis.
+
+> **⚠️ Il n'existe qu'UNE clé de seuil d'input de décrochage : `WallRide_DetachDotThreshold`.**
+> Le correctif du J8quater demandait une clé `WallRide_DetachInputDot` — elle aurait fait **doublon**
+> avec celle-ci, qui existe et est câblée depuis le J6. La clé existante a été **réutilisée et
+> retunée** à la valeur demandée (0.5). Ne pas en créer une seconde.
 
 > Le wall ride réutilise aussi `Capsule_Radius`, `Capsule_HalfHeight`, `MaxStepHeight` (§2),
 > `Speed_HardCap` (§3), `MomentumDecay_GraceTime` (§3), `Input_MoveDeadZone` (§3) et `Gravity` (§2).
@@ -705,6 +745,98 @@ Modificateurs de gameplay (Rare/Epic uniquement) : `Dash Recharge on Kill` (−0
 | `HitStop_TimeDilation` | 0.05 | — | À CALIBRER |
 | `Restart_FadeDuration` | 0.15 | s | À CALIBRER — **le restart doit être quasi instantané** |
 
+### Portage de l'arme (montage PROVISOIRE — J8)
+
+L'arme est portée par un `SpringArmComponent` **`WeaponSpring`**, enfant de `FirstPersonCamera` sur
+`BP_PlayerCharacter`, avec `TargetArmLength = 0`, `bDoCollisionTest = false`,
+`bUsePawnControlRotation = false`, et le `ChildActorComponent` `ChildActor_Laser` accroché à son
+extrémité. Le léger ressort compense l'absence de bras FP animés.
+
+> **C'est un montage provisoire.** Il disparaît dès que `SK_PlayerArms` existe : l'arme sera alors
+> attachée au socket **`S_Weapon`** du squelette de bras et le `WeaponSpring` sera supprimé.
+> Décision de Louis, J8.
+
+| Clé | Valeur | Unité | Statut | Note |
+|---|---|---|---|---|
+| `Weapon_LagSpeed` | **45** | /s | **À CALIBRER** | `WeaponSpring.CameraLagSpeed`. Plus bas = arme plus « molle ». Provisoire. **18 → 45 au J8** après playtest : « beaucoup trop mou, le pistolet sort de l'écran ». |
+| `Weapon_RotationLagSpeed` | **35** | /s | **À CALIBRER** | `WeaponSpring.CameraRotationLagSpeed`. Provisoire. **14 → 35 au J8**, même retour — c'est le lag de **rotation** qui envoyait l'arme hors cadre en tournant la tête, pas celui de position. |
+| `Weapon_LagMaxDistance` | 6 | uu | **À CALIBRER** | `WeaponSpring.CameraLagMaxDistance`. **Butée dure** ajoutée au J8 : quelle que soit la raideur, l'arme ne peut plus s'écarter de plus de 6 uu de son ancrage. C'est le filet de sécurité contre « le pistolet sort de l'écran » ; la raideur n'est plus qu'un réglage de confort. |
+
+### Rendu premier plan de l'arme (anti-clipping) — natif UE 5.8
+
+L'arme est rendue dans la passe **First Person** du moteur (`FirstPersonPrimitiveType = FirstPerson`
+sur `WeaponMesh`) : elle a son propre champ de vision et une **plage de profondeur compressée**, ce qui
+l'empêche de rentrer dans les murs quand on les longe. Aucune bidouille de matériau, aucun second
+`SceneCapture`. Demandé par Louis au J8 après playtest.
+
+| Clé | Valeur | Unité | Statut | Note |
+|---|---|---|---|---|
+| `Weapon_FirstPersonFOV` | 70 | ° | **À CALIBRER** | `FirstPersonCamera.FirstPersonFieldOfView`. Indépendant du FOV du monde (100). Plus bas = arme plus grosse à l'écran. |
+| `Weapon_FirstPersonScale` | 0.6 | × | **À CALIBRER** | `FirstPersonCamera.FirstPersonScale`. Compression de la plage de profondeur : c'est **elle** qui supprime le clipping. Baisser si l'arme traverse encore un mur. |
+
+> ⚠️ **La collision de l'arme est coupée PAR LE GRAPHE**, pas par une propriété :
+> `WeaponMesh.SetCollisionEnabled(NoCollision)` en tête de l'`EventBeginPlay` de `BP_LaserWeapon`.
+> **Ne pas « simplifier » en repassant par une propriété du composant** — trois tentatives ont échoué au
+> J8 et laissé le pistolet bloquer la capsule du joueur : le `collisionProfileName` est réappliqué à
+> l'enregistrement et écrase `collisionEnabled`, et l'acteur en jeu est spawné depuis le
+> `ChildActorTemplate`, pas depuis le CDO. Vérifié **en PIE** : `NoCollision | profil Custom`.
+> Détail : `12_PIEGES §5.25` et **`§5.26`**.
+
+Cadrage de `ChildActor_Laser` (relative transform, **pas** des valeurs de tuning) :
+location `(30, 12, −12)`, **rotation `yaw = −90°`**. Le yaw n'est pas un choix esthétique : le canon de
+`SM_Weapon_LaserPistol` est sur **`+Y`** et non `+X` (bounds mesurées : `X 6.1 × Y 30.0 × Z 14.9`,
+bouche à `Y = +22.1`). Sans lui, l'arme vise à droite de l'écran. Cf. `12_PIEGES §5.24`.
+
+### Debug du tir (PROVISOIRE — remplacé par `NS_LaserBeam` au J14)
+
+Variables `Instance Editable` catégorie `Debug` sur `BP_LaserWeapon`. Le J8 n'a **aucun** VFX :
+la ligne de debug muzzle → point d'impact est le seul retour visuel du tir.
+
+| Clé | Valeur | Unité | Statut | Note |
+|---|---|---|---|---|
+| `LaserDebug_BeamDuration` | 0.35 | s | **À CALIBRER** | `BP_LaserWeapon.DebugBeamDuration`. Durée de **vie du faisceau**, pas de dessin : le faisceau est redessiné à chaque frame pendant ce temps. ⚠️ **Le fondu n'est PAS linéaire : `alpha = sqrt(BeamTimeRemaining / LaserDebug_BeamDuration)`.** L'alpha reste haut sur les deux premiers tiers puis s'effondre — la durée « perçue » est donc plus longue que la valeur brute. Ne pas lire cette clé comme une durée de fondu linéaire. Valait 0.12 au J8 (« encore trop bref », Louis manche en main, J8bis). |
+| `LaserDebug_AttachTime` | 0.05 | s | **À CALIBRER** | `BP_LaserWeapon.DebugAttachTime`. **Fenêtre d'accroche au canon.** Tant que `Elapsed = BeamDuration − BeamTimeRemaining < AttachTime`, `BeamStart` est réécrit à `Muzzle.GetWorldLocation()` ; **au-delà, il est figé en espace monde** et plus rien ne le touche. C'est ce décrochage qui supprime la **duplication** de rayons : une fois l'origine figée, tous les redessins se superposent au pixel près. Le petit éventail résiduel pendant la fenêtre est **voulu** — c'est ce qui donne « ça part du canon ». Monter cette valeur = faisceau plus « collé » à l'arme mais duplication plus visible en course rapide ; descendre à 0 = origine figée dès l'émission. |
+| `LaserDebug_GlowWidthMult` | 5.0 | ratio | **À CALIBRER** | `BP_LaserWeapon.DebugGlowWidthMult`. Épaisseur du **halo** = `LaserDebug_LineThickness × ce facteur`. |
+| `LaserDebug_GlowAlphaMult` | 0.3 | ratio 0–1 | **À CALIBRER** | `BP_LaserWeapon.DebugGlowAlphaMult`. Alpha du **halo** = `alpha du cœur × ce facteur`. |
+| `LaserDebug_DrawLifetime` | 0.05 | s | **À CALIBRER** | `BP_LaserWeapon.DebugDrawLifetime`. **Durée de vie d'un segment dessiné** — à ne pas confondre avec `LaserDebug_BeamDuration`, qui est la durée du *faisceau*. Le faisceau étant redessiné chaque frame, il suffit que cette valeur soit **franchement supérieure à une frame**. Elle valait `DeltaSeconds` (~0.017 s) au premier jet et **plus aucun rayon n'était visible** : un segment dont la durée de vie est de l'ordre de la frame peut être expiré par le line batcher avant d'être rendu. Ne jamais la remettre à `DeltaSeconds`, ni à 0 (0 retombe sur 1 s → traînées fantômes, `12_PIEGES §6.18`). |
+| `LaserDebug_LineThickness` | 2.0 | px | **À CALIBRER** | `BP_LaserWeapon.DebugLineThickness` |
+| `LaserDebug_LineColor` | `(0.910, 0.200, 0.431, 1.0)` | LinearColor | **À CALIBRER** | `OD_Magenta_Player` `#E8336E`. **Le canal alpha de cette clé est ignoré** : il est recalculé chaque frame à `sqrt(BeamTimeRemaining / LaserDebug_BeamDuration)`. **R/G/B ne bougent jamais** — cœur et halo partagent exactement la même teinte, seul l'alpha les distingue. Ne pas éclaircir le halo vers le blanc : sur un monde `OD_White_Structure` en plein jour il se délaverait (`SPEC_COMBAT §3.2`). |
+| ~~`LaserDebug_LineDuration`~~ | ~~0.06~~ | s | **REMPLACÉE** (J8, correctif game feel) | La variable `DebugLineDuration` a été **supprimée** de `BP_LaserWeapon`. Elle dessinait **une** ligne figée en espace monde : à 3000 uu/s le canon s'éloignait pendant que la ligne restait sur place, exactement `SPEC_COMBAT §13` piège 10. Remplacée par `LaserDebug_BeamDuration`. |
+
+> **Comment le faisceau est dessiné (J8bis, 2ᵉ correctif — accroche puis décrochage).**
+> `PlayFireFX` n'affiche rien : il **arme** le faisceau — `BeamStart` = `Muzzle.GetWorldLocation()`,
+> `BeamEnd` = `Hit.ImpactPoint` (ou `Hit.TraceEnd` si le tir part à vide),
+> `BeamTimeRemaining` = `LaserDebug_BeamDuration`. C'est `UpdateBeam(DeltaSeconds)`, appelé depuis
+> l'`EventTick`, qui redessine chaque frame **de `BeamStart` vers `BeamEnd`** :
+>
+> 1. `Elapsed = LaserDebug_BeamDuration − BeamTimeRemaining` ;
+> 2. **si `Elapsed < LaserDebug_AttachTime`**, `BeamStart` est réécrit à `Muzzle.GetWorldLocation()`
+>    (le faisceau « colle » au canon) — **sinon on n'y touche plus**, l'origine est figée dans le monde ;
+> 3. `alpha = sqrt(BeamTimeRemaining / LaserDebug_BeamDuration)` ;
+> 4. **halo** : `DrawDebugLine(BeamStart, BeamEnd, alpha × GlowAlphaMult, thickness × GlowWidthMult)` ;
+> 5. **cœur** : `DrawDebugLine(BeamStart, BeamEnd, alpha, thickness)` — **dans cet ordre**, le halo
+>    d'abord, et avec **exactement le même `BeamStart` / `BeamEnd`** que le cœur ;
+> 6. `BeamTimeRemaining -= DeltaSeconds`.
+>
+> ⚠️ **La duplication de rayons vient de l'origine relue, pas de la durée.** Version J8 : l'origine
+> était relue au muzzle **à chaque frame** pendant toute la vie du faisceau. À ~1900 uu/s le canon
+> parcourt ~32 uu par frame et chaque segment vit `LaserDebug_DrawLifetime` (≈ 3 frames) : le joueur
+> voyait **deux rayons divergents** depuis le point d'impact (rapporté par Louis, manche en main).
+> Le décrochage après `LaserDebug_AttachTime` est le correctif : passé la fenêtre, tous les redessins
+> se superposent.
+>
+> ⚠️ **La durée de dessin passée à `Draw Debug Line` est `LaserDebug_DrawLifetime`, jamais 0 ni
+> `DeltaSeconds`.** `Duration <= 0` ne veut **pas** dire « une frame » : le moteur retombe sur
+> `ULineBatchComponent::DefaultLifeTime`, qui vaut **1.0 s** — soit exactement le bug qu'on corrige,
+> en pire. Cf. `12_PIEGES_OUTILLAGE §6.18`.
+>
+> ⚠️ **Toute clé neuve de cette section doit être écrite sur le `ChildActorTemplate` de
+> `BP_PlayerCharacter`, pas seulement sur le CDO de `BP_LaserWeapon`**, sinon elle vaut `0` en jeu.
+> Cf. `12_PIEGES_OUTILLAGE §5.27`. Vérifié en PIE au J8bis pour les 3 clés neuves.
+>
+> **Dérogation de Tick.** `BP_LaserWeapon` tick **uniquement** pour ce faisceau de debug, et cette
+> dérogation saute au J14 (`SPEC_COMBAT §2`).
+
 ### Échelles de confort (Settings joueur)
 
 Trois multiplicateurs exposés dans les Settings. **Défaut `1.0`, plage `0.0 – 1.0`** : le joueur ne peut
@@ -791,4 +923,5 @@ Cf. `Docs/11_ARBITRAGES.md D1` pour la règle complète de portée des données.
 | 2026-08-19 | `WallJump_ZVelocity` (§9) | `800` | **`1200`** | **Playtest J6** : « le saut du mur est trop faible, il faudrait un peu plus de verticalité ». **Cause trouvée** : 800 était **sous** `Jump_ZVelocity` (900) — le wall jump sautait moins haut qu'un saut normal (**D48**) | À CALIBRER |
 | 2026-08-19 | `WallJump_AwayVelocity` (§9) | `700` | **`1000`** | **Playtest J6** : « se décoller un peu plus du mur » (**D48**) | À CALIBRER |
 | 2026-08-19 | `WallRide_CameraTiltSpeed` (§9) | — | `10` | J6 : le roulis a besoin d'une vitesse d'interpolation, la clé n'existait nulle part (**D49**) | À CALIBRER |
+| 2026-08-20 | `Dash_RequiresSurfaceTouch` (§8) | — | `true` | **Retour de Louis manche en main (J8quinquies)** : « sur un long saut on ne puisse pas spam les dash […] là on peut limite voler en spammant les dash ». Nouvelle clé, filet de sécurité si le playtest rejette la règle (**D57**) | À CALIBRER |
 | — | — | — | — | *(à remplir au prochain playtest)* | — |
