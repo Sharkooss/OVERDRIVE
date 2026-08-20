@@ -567,6 +567,44 @@ détente sur des murs paie en style — pas en temps d'attente. Si la jauge ne m
 
 Toutes ces valeurs : **À CALIBRER**. Elles vivent dans `DA_Enemy_*` (cf. `Docs/08_DATA_SCHEMAS.md`).
 
+### Hitbox — corps et tête (`BP_EnemyBase`)
+
+| Clé | Valeur | Unité | Statut | Note |
+|---|---|---|---|---|
+| `Enemy_MeshScale` | **2.0** | — | À CALIBRER | `RelativeScale3D` du `SkeletalMeshComponent`. **La `HeadHitbox` en hérite** : ses valeurs ci-dessous sont **locales**, leur effet en monde est ×2. ⚠️ La `HeadHitbox` doit porter `RelativeScale3D = 1` **posée explicitement** (`12_PIEGES §5.64`) |
+| `Enemy_CapsuleRadius` | **70** | uu | À CALIBRER | rayon de la capsule = **hitbox corps** |
+| `Enemy_CapsuleHalfHeight` | **150** | uu | À CALIBRER | la capsule **s'arrête au cou** (`Z 0 → 300`), elle ne couvre PAS la tête |
+| `Enemy_HeadHitboxRadius` | **22.5** | uu (local) | À CALIBRER | → **45 uu en monde**. C'est **le** curseur du headshot |
+| `Enemy_HeadHitboxHeight` | **165** | uu (local) | À CALIBRER | → centre à **330 uu au-dessus des pieds** |
+
+> **Pourquoi la capsule s'arrête au cou.** Un trace ne rend que le premier bloquant, donc une sphère
+> centrée sur l'axe de la capsule n'est touchable que **là où elle déborde latéralement** :
+> zone de tête = `h ± sqrt(R² − r²)`. Tant que la capsule couvrait la tête (`r = 70`), il fallait
+> `R > 70` pour qu'un headshot existe — c'est-à-dire une hitbox de tête **plus large que tout le
+> corps** (172 uu contre 140). **Aucune valeur de `R` ne donnait une tête de taille crédible.**
+>
+> En arrêtant la capsule à `Z 300`, la sphère ne concurrence plus rien au-dessus : **sa taille
+> devient libre**. Mesuré en PIE : `R = 45`, centre `Z 331.6`, sommet de capsule `Z 301.6` →
+> zone de headshot **`Z 296.6 → 375.6`** (79 uu de haut, 90 uu de large), soit plus étroite que
+> les épaules. Retour de Louis sur la version précédente : *« beaucoup trop permissive, ça dépasse
+> beaucoup trop »*.
+>
+> **Contrepartie assumée** : au-dessus de `Z 300`, un tir qui rate la sphère de 45 ne touche
+> **plus rien** — il n'est plus absorbé par la capsule et compté en body shot. Rater la tête est
+> un miss. Si c'est trop sec à 3000 uu/s, **monter `Enemy_HeadHitboxRadius`** (55 local = 110 monde
+> serait très permissif) ; c'est désormais un vrai curseur, sans plancher imposé par la capsule.
+>
+> ⚠️ **C'est l'échelle qui a réglé le vrai bug, pas le rayon.** À l'échelle 1 la zone de tête était
+> `Z 133 → 183`, or **l'œil du joueur est à `Z ≈ 152`** (capsule 88 + caméra ~64) : tirer à
+> l'horizontale tombait *toujours* dans la zone de tête, donc **tout tir était un headshot et
+> tuait en un coup**. Ce n'était ni un défaut de hitbox ni le piège `§6.23` — c'était un ennemi
+> **à hauteur d'yeux**. Constaté par Louis manche en main le 2026-08-20. À 360 uu, viser à
+> l'horizontale touche le corps et le headshot demande de lever les yeux.
+>
+> **Écart assumé vs `SPEC_ART_DIRECTION §9.3`** (qui fiche le Grunt à 180 uu) : tranché par Louis
+> au playtest. Si la fiche fait autorité, c'est le mesh qu'il faut re-modéliser, pas l'échelle
+> qu'il faut annuler — l'ennemi doit rester nettement plus grand que le joueur.
+
 ### Projectile Shooter
 
 | Clé | Valeur | Statut |

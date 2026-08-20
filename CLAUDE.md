@@ -145,6 +145,34 @@ Conséquences pratiques :
   sauvegarde du package — les deux fichiers ont alors le **même contenu**.
 - R10 s'applique toujours : la branche existe dès le début du travail, mais le commit attend Louis.
 
+### R12 — Devant un bug ou un doute : tu instrumentes, tu fais tester, tu lis le chiffre.
+
+**Tu ne devines pas, et tu ne « relis pas le graphe » pour conclure.** Relire un graphe prouve ce
+qui est *écrit*, jamais ce qui *s'exécute* — et sur ce projet l'écart entre les deux est la source
+n°1 des pièges (`Docs/12_PIEGES_OUTILLAGE.md`, familles 5.15 / 5.25 / 5.42 / 5.56 / 5.62 :
+écriture acceptée, compilation verte, comportement faux).
+
+Dès qu'un comportement ne correspond pas à l'attendu :
+
+1. **Tu poses une sonde** — `PrintString` sur les valeurs qui décident (l'entrée, le résultat
+   intermédiaire, la condition de branchement), avec une `Duration` longue.
+2. **Tu écris l'arbre de décision AVANT le test** : « si ça affiche X, la cause est A ; si Y,
+   la cause est B ». Une sonde qui ne discrimine rien est une sonde inutile.
+3. **Tu t'arrêtes et tu demandes à Louis de tester**, en disant exactement quoi faire
+   (« tire une fois dans les pieds ») et quel chiffre relever.
+4. **Tu corriges la cause que le chiffre désigne**, pas celle que le symptôme suggère.
+5. **Tu retires l'échafaudage et tu le prouves** par recomptage de nœuds.
+
+> **Pourquoi cette règle existe.** Le 2026-08-20, un ennemi mourait en un coup. **Trois correctifs
+> ont été livrés avec la mention « c'est réglé », tous fondés sur une relecture de graphe et aucune
+> mesure** : la hitbox de tête, puis l'échelle de l'ennemi, puis un littéral manquant. Les trois
+> étaient faux. Une seule sonde, tirée une fois par Louis, a éliminé d'un coup l'arme, la double
+> application et l'arithmétique. Le coût d'une sonde est de deux minutes ; celui d'une hypothèse
+> fausse livrée comme un correctif est une session entière.
+
+Corollaire : **« je pense que c'est ça » n'est pas un diagnostic.** Tant qu'aucun chiffre relevé en
+jeu ne l'appuie, c'est une hypothèse — et elle s'annonce explicitement comme telle.
+
 ---
 
 ## 4. Environnement technique

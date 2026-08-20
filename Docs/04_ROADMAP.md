@@ -636,9 +636,42 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 - [x] Hitboxes de tête, détection, multiplicateur — **fait en avance au J8sept** (`ComponentHasTag("Head")`,
       `BP_TargetDummy.HeadHitbox`, `50 × 3.0 = 150 > 100 pv` prouvé en PIE). Reste à porter sur
       `BP_EnemyBase` au J12 : composant `HeadHitbox` **+ tag `Head`**, les deux obligatoires.
-- [ ] Hitmarker, hit-stop, son distinct
+- [x] **Portage sur un vrai ennemi — fait le 2026-08-20** (`Docs/Journal/2026-08-20_J10_Grunt_Cablage.md`).
+      `HeadHitbox` + tag `Head` sur `BP_EnemyBase`, et **la frontière tête/corps enfin tranchée**
+      (`12_PIEGES §6.23` soldé). La règle : une sphère centrée sur l'axe de la capsule n'est
+      touchable que là où elle **déborde** — `zone = h ± sqrt(R² − r²)` — donc tant que la capsule
+      couvrait la tête, **aucune hitbox de tête crédible n'était possible** (il fallait `R > r = 70`,
+      soit une tête plus large que le corps). Correctif : **la capsule s'arrête au cou** (`Z 0→300`)
+      et la sphère vit au-dessus. Mesuré en PIE : zone **`Z 296.6 → 375.6`**, 79 × 90 uu, plus
+      étroite que les épaules. Valeurs dans `07_TUNING §13`.
+- [x] **Socle ennemi, avancé du J12** : `BPC_Health` (4 fonctions, 2 dispatchers), `PDA_EnemyData`
+      (18 propriétés), `BP_EnemyBase` (`ApplyEnemyVisuals` appelée depuis le Construction Script
+      **et** le `BeginPlay` → l'ennemi est visible et dimensionné **dans l'éditeur**, donc utilisable
+      pour le mapping), `BP_Enemy_Grunt`, `DA_Enemy_Grunt`, 3 instances dans le sandbox.
+- [x] **Grunt importé et matérialisé** : `SK_Enemy_Grunt`, `SKEL_Enemy_Humanoid`, **6 AnimSequence**
+      (import manuel par Louis — `12_PIEGES §5.52`), 3 `MI_Enemy_*` aux tokens de `PALETTE.md`.
+- [x] **50 SFX importés** (`SoundWave`) dans `Audio/SFX/{Combat, Enemy, Movement}`.
+- [x] **Son d'ennemi câblé** : `HitSFX` / `DeathSFX` lus depuis `EnemyData` dans `ApplyDamage`.
 - [x] `BPI_Damageable` + `S_DamageInfo` — faits au J8
+- [ ] **Hitmarker et hit-stop — NON FAITS**, reportés. `BPC_HitStop` sur `PC_Overdrive`
+      (`SPEC_COMBAT §5.4`) et `WBP_Hitmarker` (`§5.3`) restent entiers.
+- [ ] **~40 SFX d'arme et de mouvement non câblés** — ils touchent 5 Blueprints validés
+      (`BP_LaserWeapon`, `BPC_Dash`, `BPC_Slide`, `BPC_WallRide`, `BPC_MovementState`) et exigent une
+      passe dédiée avec des Sound Cues `SC_*` (`SPEC_AUDIO §8.3` règle 3).
+- [ ] **`ABP_Enemy`** — les 6 animations sont importées, **rien ne les joue** : le Grunt est en pose
+      de référence.
 - [ ] **Test** : un headshot procure une vraie satisfaction (Test 4)
+      → ⚠️ **NON VALIDÉ.** Le headshot **fonctionne** (validé par Louis le 2026-08-20 : tir à la tête
+      létal, deux tirs au corps), mais le Test 4 porte sur la **satisfaction**, qui dépend du
+      hitmarker, du hit-stop et du son distinct — **aucun des trois n'existe**. La gate S2 reste
+      ouverte sur ce point.
+
+> **Journée coûteuse en débogage, et la leçon est écrite.** Le one-shot systématique a demandé
+> **six diagnostics avant le bon**, dont deux faussés par mes propres sondes. Trois pièges neufs en
+> sont sortis — `12_PIEGES §5.62` (littéral perdu sur un nœud opérateur), **`§5.63`** (nœud pur
+> ré-évalué après mutation de ce dont il dépend), **`§5.64`** (rayon de collision non mis à
+> l'échelle) — et une règle : **`CLAUDE.md` R12 — devant un bug, on instrumente, on fait tester
+> Louis, on lit le chiffre. Et on valide l'instrument avant de lui faire confiance.**
 
 ### J11 — Melee & wall slam
 - [ ] `BPC_Melee` : sphere trace, montage, cooldown
