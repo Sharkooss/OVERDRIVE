@@ -541,7 +541,7 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       → Audits : 1 racine exec / **0 nœud mort** dans les deux graphes, **un seul `type_id` de trace**
       dans `ResolveShot`, tous les `self` directs (2.21), compilation `warnings_as_errors = True` verte.
       `SPEC_COMBAT §11` réécrit (le modèle 2 passes devient une note historique), §2/§3.1/§3.3/§12 alignés.
-      **en attente du playtest de Louis (R8 / R10) — aucun commit**
+      → ✅ **VALIDÉ par Louis le 2026-08-20** — commit `c4b6473`.
 
 > Reporté hors J8, volontairement : `ApplyRecoil` (`§3.6`, exige un
 > `BP_PlayerCameraManager` custom → J14), chaleur du tir (J9 — ~~gate heat~~ : il n'y a **plus de
@@ -556,26 +556,51 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 > Motif : `SPEC_COMBAT §1` — *« le combat est un sous-produit du mouvement, jamais son
 > interruption »*, et ce verrou était la **seule interruption du jeu**.
 
-- [ ] **`PDA_WeaponData` : 4 propriétés à ajouter** (`08_DATA_SCHEMAS §3`) — `HeatPerMissedShot`,
-      `HeatCoolPerHeadshot`, `HeatCoolRateAtSpeed`, `HeatCoolSpeedThreshold`, puis renseigner
-      `DA_Weapon_Laser` et **relire l'asset**. ⛔ **Ne rien supprimer** : les 6 clés `INACTIVE`
+*(implémenté le 2026-08-20, cf. `Docs/Journal/2026-08-20_J9_Heat.md`)*
+
+- [x] **`PDA_WeaponData` : 4 propriétés ajoutées** (`08_DATA_SCHEMAS §3`) — `HeatPerMissedShot`,
+      `HeatCoolPerHeadshot`, `HeatCoolRateAtSpeed`, `HeatCoolSpeedThreshold`, `DA_Weapon_Laser`
+      renseigné (`11 / 25 / 20 / 3000`) et **relu**. ⛔ **Rien supprimé** : les 6 clés `INACTIVE`
       (`HeatPerShot`, `HeatDecayRate`, `HeatDecayDelay`, `OverheatDuration`,
-      `OverheatExitThreshold`, `OverheatDecayMultiplier`) restent en place, **inertes, lues par
-      personne** (`07_TUNING §11`). 25 → **29** propriétés.
-- [ ] **`BPC_Heat`** : `AddHeat` / `RemoveHeat`, états `E_HeatState` (sémantique `D58`,
-      `08_DATA_SCHEMAS §1`), timer `Heat_TickInterval`. **Ni décroissance passive, ni délai,
-      ni verrou, ni condition de sortie** — tout ça est supprimé (`SPEC_COMBAT §4`).
-- [ ] **Sources et puits** : `+Heat_PerMissedShot` **uniquement** si le tir n'a touché aucun acteur
+      `OverheatExitThreshold`, `OverheatDecayMultiplier`) sont en place, **inertes, lues par
+      personne** (`07_TUNING §11`). 25 → **29** propriétés, comptées.
+      → catégorie réelle **`Heat`** et non `Combat` : c'est celle des 3 clés de chaleur du J8.
+- [x] **`BPC_Heat`** (`Weapons/Laser/`, composant `Heat` sur `BP_LaserWeapon`) : 21 variables,
+      18 fonctions, **`EventGraph` vide**, timer `Heat_TickInterval` par `SetTimerByFunctionName`.
+      **Ni décroissance passive, ni délai, ni verrou, ni condition de sortie** (`SPEC_COMBAT §4`).
+      → ⚠️ **`CurrentState : E_HeatState` remplacé par `bWarningActive` / `bOverheatActive`** — aucun
+      outil ne crée une variable typée enum (`12_PIEGES §5.2`). Même information, `E_HeatState`
+      intact et toujours valide. Idem pour le dispatcher :
+      **`OnHeatChanged(Ratio, HeatValue, bWarning, bOverheat)`**. Écart écrit dans `SPEC_COMBAT §4.4`.
+      → `Style_Loss_Heat` n'a **aucun DataAsset hôte** (le style n'en a pas avant le J18) : portée par
+      `BPC_Heat.StyleLossHeatPerSecond`, `Instance Editable`, défaut **0.20** (`07_TUNING §14`).
+- [x] **Sources et puits** : `+Heat_PerMissedShot` **uniquement** si le tir n'a touché aucun acteur
       `BPI_Damageable` · `−Heat_CoolPerHeadshot` sur headshot · `−Heat_CoolRateAtSpeed` /s tant que
       la vitesse horizontale ≥ `Heat_CoolSpeedThreshold`. **Un body shot ne fait rien bouger.**
-- [ ] **`TryFire` : supprimer la gate d'overheat** (`SPEC_COMBAT §3.1`) et déplacer le calcul de
-      chaleur **après** `ProcessHit` — elle dépend désormais du **résultat** du tir.
-- [ ] **`MPC_Global.HeatRatio`** (+ `OverheatActive`) : la couleur de l'arme réagit sans BP
-      supplémentaire (`08_DATA_SCHEMAS §6`).
-- [ ] **`WBP_HeatBar` + affichage provisoire du coût** (`SPEC_UI_HUD §3.3a`) : à partir de
-      `Heat_WarningThreshold`, afficher la **grandeur réelle** — `HEAT 82 · STYLE −0.20/s`.
-      ⛔ **Aucun pourcentage de score inventé.** ⛔ **Ni icône de verrou, ni crosshair barré,
-      ni clic refusé** : plus rien n'est bloqué.
+      → **Les 4 prouvés en PIE**, mesures dans le journal.
+- [x] **`TryFire`** : **il n'y avait aucune gate d'overheat à supprimer** — le J8 n'avait pas
+      implémenté la chaleur. Nouvelle fonction `BP_LaserWeapon.ApplyShotHeat(Hit, bBlockingHit)`
+      (9 nœuds), insérée dans l'`EventGraph` par `create_node` + `connect_pins` (30 → 34 nœuds,
+      les 30 `type_id` d'origine rediffés).
+      → ⚠️ **Correctif d'ordre trouvé en PIE** : posée **après** `ProcessHit` comme le prescrivait la
+      spec, elle classait un **headshot létal en tir raté** (+11 au lieu de −25) — `ProcessHit`
+      détruit la cible, donc le `Cast<BPI_Damageable>` d'après échoue. Déplacée **juste après
+      `ResolveShot`**, avant tout dégât. `SPEC_COMBAT §3.1` réécrit, `12_PIEGES §6.25`.
+- [-] **`MPC_Global.HeatRatio`** (+ `OverheatActive`) — **NON FAIT, reporté au J14, volontairement.**
+      `MPC_Global` n'existe pas et **aucun matériau d'arme ne l'échantillonne** : écrire dedans au J9
+      aurait produit une valeur que personne ne lit, c'est-à-dire `12_PIEGES §6.24` reconstruit à
+      l'identique. Le **J14 crée déjà `MPC_Global`** et fait les matériaux — la couleur de l'arme s'y
+      branche en une passe. Ligne ajoutée au J14.
+- [x] **`WBP_HeatBar` + affichage provisoire du coût** (`SPEC_UI_HUD §3.3a`/`§3.3b`) : 12 widgets,
+      8 blocs sans panneau, ancré `0,1` / `X+48 Y−76` / `320×14` conformément au `§2` ligne G.
+      Ligne chiffrée `HEAT 11.0 | STYLE -0.20/s`, **cachée** sous `Heat_WarningThreshold`, **visible**
+      au-dessus. ⛔ Aucun pourcentage inventé — `CurrentHeat` et `GetCurrentStylePenalty()` sont lus.
+      ⛔ Ni icône de verrou, ni crosshair barré, ni clic refusé.
+      → **Reporté au J19** (habillage, R4) : remplissage **continu** du dernier bloc, pulse en
+      `Warning`, clignotement 6 Hz à `Heat_Max`, SFX `S_Heat_Warning`. Le dispatcher
+      `OnWarningEntered` existe déjà et se déclenche, il n'a pas encore d'abonné.
+      → **Provisoire et daté** : c'est `BPC_Heat` qui crée la jauge et la pousse (`PC_Overdrive` n'a
+      aucun accès au composant). Au J19 `WBP_HUD` s'abonne à `OnHeatChanged` — 3 nœuds à retirer.
 - [ ] **⏳ DETTE DATÉE AU J18 — câblage réel de `Style_Loss_Heat`.** `BPC_StyleMeter` n'existe qu'au
       **J18** : au J9, `BPC_Heat.GetCurrentStylePenalty()` **calcule et fait afficher** la perte,
       mais **personne ne la consomme**. Au J18, brancher le timer de chaleur sur
@@ -586,9 +611,26 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       `Laser_TraceRadius` du J8 (`12_PIEGES §6.24`) — une valeur de tuning qui ne pilote rien, qu'on
       croit régler et qui ne change rien : **deux chantiers perdus**. La mécanique doit rester
       **jugeable dès le J9**.
-- [ ] **Test (R8)** : la jauge dit **« tu arroses »**, jamais **« attends »**. Je n'ai à aucun
+- [x] **Test (R8)** : la jauge dit **« tu arroses »**, jamais **« attends »**. Je n'ai à aucun
       moment eu à cesser de tirer pour laisser refroidir. Viser la tête devient tentant **pour
       refroidir**, pas seulement pour les dégâts. Checklist complète : `SPEC_COMBAT §12`.
+      → ✅ **VALIDÉ par Louis le 2026-08-20**, en **deux** playtests.
+      **1ᵉʳ** : les 4 règles de `D58` passent (headshot qui refroidit, vitesse qui refroidit, rien
+      qui bouge à l'arrêt, non-régression J8) mais **les 8 blocs ne se dessinaient pas** — deux
+      causes empilées, corrigées et **revérifiées à l'image** (`12_PIEGES §5.43`).
+      **2ᵉ** : « les barres sont bien affichées », « **le refroidissement se mérite, c'est bien sans
+      trop punir** », « je valide ».
+      → ⏳ **Une question reste ouverte, et elle ne peut pas se trancher aujourd'hui** : *« sans trop
+      punir, ça je ne peux pas trop le savoir, on verra quand on implémentera la jauge de style »*
+      (Louis). **Le vrai jugement de `Style_Loss_Heat` appartient au J18**, quand la perte affichée
+      devient la perte appliquée. Reporté dans la dette J18 ci-dessous.
+
+> **⚠️ Bug hors J9 à traiter avant le J12** (`12_PIEGES §6.26`) : le `BeginPlay` de `BP_LaserWeapon`
+> ne va pas jusqu'au bout — **`OwnerCharacter` et `OwnerController` sont nuls en jeu**, mesuré sur
+> l'instance PIE. `EnsureOwnerRefs` rattrape le contrôleur à chaque tir, **personne ne rattrape le
+> personnage**. Conséquence encore inerte : `S_DamageInfo.Instigator` est nul sur tous les tirs.
+> Sans effet sur `BP_TargetDummy`, **cassera le crédit de kill et le score** dès `BP_EnemyBase`.
+> Découvert au J9, **non corrigé** (hors périmètre), signalé à Louis.
 
 ### J10 — Headshots & feedback
 - [x] Hitboxes de tête, détection, multiplicateur — **fait en avance au J8sept** (`ComponentHasTag("Head")`,
@@ -626,6 +668,12 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 - [ ] `NS_LaserImpact`, `NS_Muzzle`, `NS_Headshot`, `NS_EnemyDeath`, `NS_Dash`
 - [ ] SFX placeholder sur toutes les actions P0
 - [ ] `MPC_Global` + speed lines
+- [ ] **⏳ Dette J9 à solder — `MPC_Global.HeatRatio` / `OverheatActive`** (`08_DATA_SCHEMAS §6`) :
+      couper le J9 sur ce point était volontaire — écrire dans une collection que **aucun matériau
+      n'échantillonne** est le piège `12_PIEGES §6.24`. Ici, `MPC_Global` se crée de toute façon et
+      les matériaux d'arme (`MI_Weapon_Emissive`) se font dans la même passe. Câbler les **deux
+      écritures dans `BPC_Heat.CommitHeat`** (à côté de `PushToHeatBar`) **et** l'échantillonnage
+      dans `M_Weapon_Base` — les deux, sinon la clé ne pilote toujours rien.
 - [ ] **🚦 GATE SEMAINE 2**
 
 ---
@@ -660,6 +708,13 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       ⚠️ **Ce n'est pas un `E_StyleEvent`** : perte **continue**, hors `DT_StyleEvents`, hors
       dégressivité et hors anti-farm. Vérifier aussi que `Style_Gain_HighSpeedSustain` et
       `Heat_CoolSpeedThreshold` portent bien **la même valeur de seuil** (`07_TUNING §11`/`§14`).
+      → **Ce jour-là, rejouer la question laissée ouverte au J9** : *« est-ce que ça punit trop ? »*.
+      Louis a validé la chaleur au J9 en disant explicitement qu'il **ne pouvait pas encore le
+      savoir** — la jauge coûtait un nombre affiché, pas un score. Une fois `Style_Loss_Heat`
+      branchée, **`−0.20 /s` est le premier curseur à rejuger**, avant `Heat_CoolPerHeadshot` (25)
+      et `Heat_CoolRateAtSpeed` (20/s). Les trois se règlent ensemble ou pas du tout.
+      → `BPC_Heat.StyleLossHeatPerSecond` (`Instance Editable`, défaut 0.20) **disparaît** au profit
+      du DataAsset du style ; `GetCurrentStylePenalty()` reste la source unique et **ne change pas**.
 
 ### J19 — Rank, résultats & vies
 - [ ] Calcul du rank, `S_RankThresholds`, `PDA_LevelData`

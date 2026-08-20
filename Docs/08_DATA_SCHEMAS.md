@@ -240,12 +240,14 @@ Instance : `DA_Weapon_Laser`. Valeurs : `Docs/07_TUNING.md §11`.
 
 > ### 🔥 Refonte de la chaleur — `11_ARBITRAGES D58` (2026-08-20)
 >
-> **L'asset n'est PAS encore modifié. C'est du travail de J9.**
+> **✅ FAIT au J9 (2026-08-20). 29 propriétés, comptées et relues.**
 >
-> **À ajouter au J9** — 4 propriétés `Instance Editable`, catégorie `Combat`, valeurs dans
-> `07_TUNING §11` : `HeatPerMissedShot` · `HeatCoolPerHeadshot` · `HeatCoolRateAtSpeed` ·
-> `HeatCoolSpeedThreshold`. Après création, **renseigner `DA_Weapon_Laser`** et **relire l'asset**
-> (règle 1 de `12_PIEGES` : un outil qui n'a pas erré n'a pas forcément écrit).
+> **Ajouté au J9** — 4 propriétés `Instance Editable`, catégorie **`Heat`** (et non `Combat` :
+> c'est celle qui portait déjà `HeatMax` / `HeatWarningThreshold` / `HeatTickInterval` depuis le J8),
+> valeurs dans `07_TUNING §11` : `HeatPerMissedShot` **11** · `HeatCoolPerHeadshot` **25** ·
+> `HeatCoolRateAtSpeed` **20** · `HeatCoolSpeedThreshold` **3000**.
+> `DA_Weapon_Laser` renseigné puis **relu**, et les 7 valeurs **revérifiées sur l'instance PIE**
+> via le cache de `BPC_Heat` — c'est la seule lecture qui prouve que le bon champ est lu.
 >
 > **À NE PAS supprimer** — les 6 propriétés marquées ⛔ ci-dessus (`HeatPerShot`, `HeatDecayRate`,
 > `HeatDecayDelay`, `OverheatDuration`, `OverheatExitThreshold`, `OverheatDecayMultiplier`)

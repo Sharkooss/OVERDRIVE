@@ -101,32 +101,41 @@ TryFire():
     bCanFire = false
     SetTimerByEvent(EndFireCooldown, WeaponData.FireCooldown)   // 07_TUNING §11 Laser_FireCooldown
     ShotResult = ResolveShot()                                  // §3.2-3.4 + §11
-    bHitTarget = false ; bHeadshot = false
+    ApplyShotHeat(ShotResult.Hit, ShotResult.bBlockingHit)      // ── CHALEUR : ICI, avant tout dégât (§4)
     if (ShotResult.bBlockingHit):
-        bHitTarget = ShotResult.Hit.Actor implements BPI_Damageable   // cible, PAS un mur
-        bHeadshot  = IsHeadshot(ShotResult.Hit)
-        ProcessHit(ShotResult.Hit, bHeadshot)                   // §3.5 — headshot PLEIN, aucune condition
+        ProcessHit(ShotResult.Hit, IsHeadshot(ShotResult.Hit))  // §3.5 — headshot PLEIN, aucune condition
     PlayFireFX(ShotResult.Hit, ShotResult.bBlockingHit)         // toujours, même à vide
     ApplyRecoil()                                               // §3.6
-    // ── Chaleur : TOUJOURS en dernier, et selon que le tir a TOUCHÉ ou non (§4)
-    if      (!bHitTarget): BPC_Heat.AddHeat(WeaponData.HeatPerMissedShot)
-    else if (bHeadshot)  : BPC_Heat.RemoveHeat(WeaponData.HeatCoolPerHeadshot)
-    // un body shot ne fait NI monter NI descendre la chaleur — c'est voulu (§4)
     OnShotFired.Broadcast(ShotResult.Hit, ShotResult.bBlockingHit)
+
+ApplyShotHeat(Hit, bBlockingHit):                               // BP_LaserWeapon, J9
+    if (!bBlockingHit):                    Heat.NotifyShotResolved(false, false) ; return
+    if (Cast<BPI_Damageable>(Hit.Actor) échoue): Heat.NotifyShotResolved(false, false) ; return
+    Heat.NotifyShotResolved(true, IsHeadshot(Hit))              // body = neutre, tête = refroidit (§4.1)
 ```
 > **Il n'y a plus de gate de chaleur** (`11_ARBITRAGES D58`) : la chaleur ne bloque **jamais** le tir.
 > L'ancienne gate 1 « `if Overheated: PlayDenyFeedback(); return` » **a disparu**, et avec elle le
 > `PlayDenyFeedback` du chemin de tir. Les deux gates restantes sont le cooldown et la mort.
+> Il n'y a jamais eu de gate d'overheat dans le code : le J8 n'avait pas implémenté la chaleur,
+> il n'y a donc **rien eu à retirer** au J9 — seulement à ne pas l'écrire.
 >
-> **Ordre imposé, et il a changé de raison** : la chaleur se règle **après** la résolution du tir
-> parce qu'elle **dépend de son résultat** — un tir qui touche une cible ne chauffe pas, un headshot
-> refroidit, un tir dans le vide ou dans un mur chauffe. Elle ne peut donc pas être calculée avant
-> `ResolveShot()`.
+> ### ⚠️ Ordre corrigé au J9 : la chaleur se calcule AVANT `ProcessHit`, pas après
 >
-> **Un seul test d'interface par tir.** `bHitTarget` et la première ligne de `ProcessHit` (§3.5)
-> posent la **même** question. À l'implémentation (J9), le résultat se calcule une fois et se
-> réutilise : deux `Does Implement Interface` sur le même acteur dans la même frame est du gaspillage
-> et, surtout, deux endroits où la règle peut diverger.
+> *La v1 de ce §3.1 plaçait la chaleur en **dernier**, au motif qu'elle « dépend du résultat du tir ».
+> C'est vrai de la **résolution** (`ResolveShot`), c'est faux des **dégâts**.* `ProcessHit` appelle
+> `ApplyDamage`, qui **détruit la cible** quand le coup est létal : un `Cast<BPI_Damageable>` exécuté
+> après lui sur `Hit.Actor` porte sur un acteur `pending kill` et **échoue**.
+> **Mesuré en PIE au J9** : un headshot létal était classé `MissedShot` et faisait **monter** la
+> chaleur de +11 — l'exact inverse de `D58`. Le bug n'apparaissait que sur les tirs qui **tuent**.
+> Détail et règle générale : `12_PIEGES §6.25`.
+>
+> **Ce qui compte n'a pas changé** : la chaleur reste calculée **après `ResolveShot()`**, puisqu'elle
+> dépend de ce que le rayon a touché. Elle est simplement calculée **avant qu'on n'y touche**.
+>
+> **Deux tests d'interface par tir, assumé.** `ApplyShotHeat` refait le `Cast<BPI_Damageable>` que
+> `ProcessHit` fait déjà (§3.5). Aucune divergence possible — c'est le **même cast sur le même
+> acteur** — et l'alternative (faire remonter un `bool` de `ProcessHit`) coûtait une signature
+> modifiée et un site d'appel recréé (`12_PIEGES §2.37`) pour économiser un cast par tir.
 
 ### 3.2 Origine du trace — la règle
 | | Origine | Direction | Longueur |
@@ -328,6 +337,37 @@ continu** au `BPC_StyleMeter`, par le même timer `Heat_TickInterval` qui gère 
 > Format exact et exemple chiffré : `SPEC_UI_HUD §3.3a`.
 
 ### 4.4 API & feedback
+
+> ### ✅ État réel après le J9 (2026-08-20) — ce paragraphe fait foi sur le code
+>
+> `BPC_Heat` vit dans `Content/OVERDRIVE/Weapons/Laser/`, **attaché à `BP_LaserWeapon`** sous le nom
+> de composant `Heat`. **21 variables, 18 fonctions, `EventGraph` vide** (aucun Tick, aucun event).
+>
+> | Prévu par la spec | Livré au J9 | Écart |
+> |---|---|---|
+> | `CurrentHeat`, `AddHeat`, `RemoveHeat`, `GetHeatRatio()`, `GetCurrentStylePenalty()`, `IsOverheated()` | ✅ tels quels | — |
+> | `CurrentState : E_HeatState` | ❌ **remplacé par deux booléens** `bWarningActive` / `bOverheatActive` | **Aucun outil ne sait créer une variable typée enum** (`12_PIEGES §5.2`). L'enum `E_HeatState` **existe et reste valide** ; il sera branché le jour où Louis pose la variable à la main. Les deux booléens portent **exactement** la même information que `Warning` et `Overheated` ; `Cooling` / `Building` se déduisent du signe de `LastHeatDelta`. |
+> | `OnHeatChanged(Ratio, State)` | ✅ `OnHeatChanged(Ratio, HeatValue, bWarning, bOverheat)` | même raison : pas de pin enum. Le dispatcher **existe et se déclenche** ; `WBP_HUD` s'y branchera au J19 sans rien réécrire. |
+> | `OnWarningEntered` · `OnOverheatStarted` · `OnOverheatEnded` | ✅ tels quels | — |
+> | Timer `Heat_TickInterval`, **jamais en Tick** | ✅ `SetTimerByFunctionName("HeatTickStep", TuneTickInterval, looping)` | armé par `InitializeHeat`, appelée en **tête** du `BeginPlay` de l'arme (`12_PIEGES §6.26`). |
+> | `MPC_Global.HeatRatio` / `OverheatActive` | ❌ **non fait**, reporté au **J14** | `MPC_Global` n'existe pas encore et **aucun matériau d'arme ne l'échantillonne**. L'écrire au J9 aurait produit une valeur que personne ne lit — le piège `12_PIEGES §6.24` reconstruit. Le J14 crée déjà `MPC_Global` (`04_ROADMAP`), c'est là que la couleur de l'arme se branche. |
+>
+> **Fonctions internes non prévues par la spec, et pourquoi** : `ApplyHeatDelta(Delta, Source)` et
+> `CommitHeat(NewHeat, Delta, Source)` — le clamp, les transitions d'état et le broadcast vivent en
+> **un seul** endroit, et `Source` (chaîne : `MissedShot` / `Headshot` / `Speed` / `Reset`) rend
+> chaque variation lisible en headless. `UpdateWarningFlag` / `UpdateOverheatFlag` sont séparées
+> parce qu'un `if` **termine le flux d'exec** en Blueprint (`12_PIEGES §2.11`) : une fonction, un `if`.
+> `EnsureCMC` et `PushToHeatBar` sont les deux résolutions **paresseuses** (voir juste après).
+>
+> **Résolution paresseuse — pourquoi rien n'est câblé au `BeginPlay`.**
+> `BP_LaserWeapon` est un **Child Actor** : à son `BeginPlay`, ni le pawn joueur ni le
+> `PlayerController` ne sont fiables (`12_PIEGES §6.26` — `OwnerCharacter` reste **nul** en jeu).
+> Le J9 ne s'y accroche donc pas : `InitializeHeat` ne fait que **lire le tuning et armer le timer**
+> (le `WeaponData` est un défaut de classe, toujours valide), et `HeatTickStep` appelle `EnsureCMC`
+> à **chaque tick tant que ce n'est pas résolu** — cette fonction récupère alors
+> `GetPlayerCharacter(0).CharacterMovement`, crée la jauge et pose `bInitialized = true`.
+> Le refroidissement par la vitesse (`CoolBySpeed`) et le cumul de perte de style sont gardés par ce
+> drapeau ; **`AddHeat` / `RemoveHeat` / `NotifyShotResolved` fonctionnent sans lui.**
 
 **API** : `CurrentHeat` · `CurrentState` · `AddHeat(Amount)` · `RemoveHeat(Amount)` ·
 `GetHeatRatio()` (pure) · `GetCurrentStylePenalty()` (pure — renvoie `Style_Loss_Heat` si

@@ -679,6 +679,15 @@ ScoreTime   = max( 0, (ParTime - Time) × 100 )
 > **affiche** la perte qui s'appliquera (`SPEC_UI_HUD §3.3`) sans que personne ne la consomme.
 > C'est la parade au piège « une valeur de tuning qui ne pilote rien » (`12_PIEGES §6.24`).
 >
+> **Où vit la valeur, au J9** (implémenté le 2026-08-20) : `Style_Loss_Heat` n'a **aucun DataAsset
+> hôte** — elle appartient au style, et `PDA_ScoreData` n'existe pas. Elle est donc portée par
+> `BPC_Heat.StyleLossHeatPerSecond`, variable **`Instance Editable`, catégorie `Heat|Tuning`**,
+> défaut **0.20** (magnitude positive, affichée avec son signe : `STYLE -0.20/s`). C'est la seconde
+> forme autorisée par **R3** (« DataAssets **ou** variables `Instance Editable` + `Category` »).
+> ⚠️ Le défaut réel se pose sur le **template SCS du composant** dans `BP_LaserWeapon`
+> (`…BP_LaserWeapon_C:Heat_GEN_VARIABLE`), **pas** sur le CDO de `BPC_Heat` — cf. `12_PIEGES §5.42`.
+> Au J18, la clé déménage dans le DataAsset du style et cette variable disparaît.
+>
 > **`Style_ResetDiminishAfter`** : délai sans répétition d'un event avant que son gain redevienne plein.
 > `Style_DiminishPerRepeat` (0.7 ×) s'applique en cascade tant que le **même** `E_StyleEvent` se répète
 > (kill → ×1.0, kill → ×0.7, kill → ×0.49…). Si ce même event n'est pas rejoué pendant

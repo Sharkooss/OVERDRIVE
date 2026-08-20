@@ -375,6 +375,51 @@ HEAT 82 · STYLE −0.20/s        ← exemple d'affichage. Les deux nombres sont
 > **Elle n'est pas provisoire par paresse** : au J18 la valeur affichée devient la valeur appliquée,
 > et il n'y a rien à réécrire.
 
+#### 3.3b État réel après le J9 (2026-08-20) — ce paragraphe fait foi sur l'asset
+
+`Content/OVERDRIVE/UI/HUD/WBP_HeatBar` — **12 widgets, 6 variables, 2 fonctions.**
+Arbre : `RootCanvas` → `HeatRoot` (VerticalBox, ancre `0,1`, alignement `0,1`, offset `X +48 / Y −76`,
+**320 × 34**, Z-order 0, conforme au §2 ligne G) → `CostText` (`Automatic`, **police Bold 13**,
+marge basse 4) + `Blocks` (HorizontalBox, **`Automatic`**) → `Block_0..7` (Image,
+**`Brush.DrawAs = RoundedBox`, `FixedRadius`, rayons 0**, `ImageSize 36 × 14`, `FillWidth 1`,
+gouttière 3 px). **Ni panneau, ni bordure** (§3.0a).
+
+> ⚠️ **Deux réglages non négociables, chacun payé par un playtest raté** (`12_PIEGES §5.43`) :
+> **(a)** un `Image` UMG **sans ressource de brush ne dessine RIEN** — `DrawAs = RoundedBox` est ce
+> qui lui donne un corps sans exiger de texture ; **(b)** `Blocks` doit être en **`Automatic`** et la
+> police du texte **bornée**, sinon le `TextBlock` (24 pt par défaut) consomme toute la hauteur du
+> `VerticalBox` et les 8 blocs, en `Fill`, héritent de **0 px**. Les deux fautes produisent le même
+> symptôme — une jauge invisible dont **toutes les valeurs sont correctes en introspection.**
+
+**Remplissage** : le bloc `i` est plein dès que `Ratio × 8 > i`. Choix délibéré plutôt que
+`>= i+1` : **un seul tir raté (11 %) doit allumer un bloc**, sinon le premier retour visuel n'arrive
+qu'au 2ᵉ tir raté et la jauge a l'air cassée. Conséquence assumée : à `HEAT 80` on voit **7** blocs,
+pas 6. La grandeur exacte est de toute façon écrite juste au-dessus (§3.3a).
+
+**API publique** : `SetHeat(Ratio, HeatValue, bWarning, bOverheat, StylePenalty)` — un seul point
+d'entrée, poussé par le composant (aucun binding, aucun Tick widget, conforme §3.0).
+
+| Point | Livré | Écart assumé |
+|---|---|---|
+| 8 blocs, sans panneau | ✅ | — |
+| Couleurs `OD_Navy_Ink` / `OD_Amber_Heat` / `OD_Red_Danger` | ✅ 4 variables `Instance Editable` cat. `HeatBar\|Colors` — `Color_Empty` (navy α 0.22), `Color_Normal` (navy α 1), `Color_Warning` (ambre), `Color_Max` (rouge) | — |
+| Bloc partiel « qui se remplit en continu » | ❌ **binaire** : le bloc `i` est plein si `Ratio × 8 > i` | La granularité continue est portée par la **ligne chiffrée**, qui affiche `CurrentHeat` exact. Reporté au **J19**, avec `WBP_HUD`. |
+| Pulse en `Warning`, clignotement 6 Hz à `Heat_Max` | ❌ | Animation UMG — **juice**, donc J14/J19 (R4). Le J9 livre la mécanique, pas son habillage. |
+| SFX `S_Heat_Warning` au franchissement | ❌ | Le dispatcher `OnWarningEntered` **existe et se déclenche** ; il n'a pas encore d'abonné. J14. |
+| Séparateur `·` de l'exemple `HEAT 82 · STYLE −0.20/s` | ⚠️ **`\|`** et un signe `-` ASCII : `HEAT 11.0 \| STYLE -0.20/s` | Chaîne construite par `Utilities\|String\|BuildString(Float)` (`12_PIEGES §2.40`) ; caractères non-ASCII évités dans le DSL. Cosmétique, à repasser au J19. |
+| Apparition **exactement** au franchissement du seuil | ✅ `Visibility = Hidden` sous `Heat_WarningThreshold`, `Visible` au-dessus | — |
+| ⛔ Aucun pourcentage inventé | ✅ `CurrentHeat` et `GetCurrentStylePenalty()` sont **lus**, jamais recalculés dans le widget | — |
+| ⛔ Aucune icône de verrou / crosshair barré | ✅ rien de tel n'existe | — |
+
+> ⚠️ **Qui crée la jauge au J9, et pourquoi ce n'est pas `PC_Overdrive`.** `WBP_HUD` n'existe qu'au
+> **J19**. Le crosshair est ajouté au viewport depuis `PC_Overdrive::BeginPlay` (§3.1) — mais le
+> `PlayerController` **n'a aucun moyen d'atteindre `BPC_Heat`**, qui vit sur un Child Actor du pawn.
+> C'est donc **`BPC_Heat.EnsureCMC` qui crée `WBP_HeatBar` et l'ajoute au viewport**, dans la même
+> résolution paresseuse qui récupère le `CharacterMovement` (`SPEC_COMBAT §4.4`), puis
+> `PushToHeatBar()` pousse à chaque variation. **C'est provisoire et daté** : au J19, `WBP_HUD`
+> s'abonne à `OnHeatChanged` (le dispatcher existe déjà et porte les 4 valeurs nécessaires),
+> `EnsureCMC` perd ses 3 nœuds de création et `PushToHeatBar` est supprimée. **Rien d'autre ne bouge.**
+
 ### 3.4 `WBP_DashCharges`
 Source `BPC_Dash.OnDashChargesChanged(Current,Max)` + `OnDashCooldownProgress(Ratio)` (Timer 20 Hz).
 N losanges 24 px espacés de 10 px `[À CALIBRER]`, N = `Dash_MaxCharges` (rebuild du `HorizontalBox` seulement
