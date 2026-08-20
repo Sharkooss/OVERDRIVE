@@ -65,5 +65,11 @@ Art_Source/*.blend[0-9]
 # Images intermédiaires des planches de contact (regénérées à chaque rendu)
 Art_Source/Preview/_tmp/
 
+# WAV de synthèse : entièrement regénérables par `python overdrive_sfx.py`.
+# La source de vérité, ce sont les paramètres du script, pas les octets.
+# Seuls les WAV validés et importés dans Content/OVERDRIVE/Audio/ sont suivis.
+Art_Source/Audio/out/
+Art_Source/Audio/synth/__pycache__/
+
 # Worktrees temporaires des tâches Claude Code
 .claude/worktrees/
