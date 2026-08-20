@@ -64,7 +64,7 @@ socket `S_Weapon` de `SK_PlayerArms`). **Tick désactivé** — sauf la dérogat
 | `bCanFire` | Bool | Gate du cooldown |
 | `bUseMuzzleConfirmTrace` | Bool | Défaut `false` (§3.4) |
 | `TryFire()` | Event | Point d'entrée unique depuis `IA_Fire` (§3) |
-| `ResolveShot()` | Function | Traces + point d'impact. **Aucun effet de bord.** Sorties : `Hit`, `bBlockingHit`, **`bAssisted`** (J8sept, §11) |
+| `ResolveShot()` | Function | **Un** sphere trace + point d'impact. **Aucun effet de bord.** Sorties : `Hit`, `bBlockingHit` (§11) |
 | `ProcessHit(Hit, bHeadshot)` | Function | Construit `S_DamageInfo`, appelle `BPI_Damageable` |
 | `PlayFireFX(ImpactPoint, Hit)` | Function | VFX/SFX/shake/recoil. **Aucune logique de gameplay.** **Ne dessine plus le faisceau : il l'arme** (`BeamEnd` + `BeamTimeRemaining`, cf. §2 dérogation). |
 | `IsHeadshot(Hit)` | Pure | **`Hit.Component.ComponentHasTag("Head")`** — **jamais** `Hit.BoneName` (§5.1, encadré « écart d'implémentation ») |
@@ -100,7 +100,7 @@ TryFire():
     SetTimerByEvent(EndFireCooldown, WeaponData.FireCooldown)   // 07_TUNING §11 Laser_FireCooldown
     ShotResult = ResolveShot()                                  // §3.2-3.4 + §11
     if (ShotResult.bBlockingHit):
-        ProcessHit(ShotResult.Hit, IsHeadshot(ShotResult.Hit) AND NOT ShotResult.bAssisted)  // §3.5 + §11
+        ProcessHit(ShotResult.Hit, IsHeadshot(ShotResult.Hit))  // §3.5 — headshot PLEIN, aucune condition
     PlayFireFX(ShotResult.ImpactPoint, ShotResult.Hit)          // toujours, même à vide
     ApplyRecoil()                                               // §3.6
     BPC_Heat.AddHeat(WeaponData.HeatPerShot)                    // 07_TUNING §11 — TOUJOURS en dernier
@@ -136,8 +136,9 @@ Les tokens `OD_*` sont les seuls valides ; `OD_Magenta_Primary`, `OD_Pink_Glow`,
 
 ### 3.3 Trace & collision
 ```
-LineTraceByChannel(
+SphereTraceByChannel(
     Start = CameraLocation, End = CameraLocation + ControlForward * Range,
+    Radius = WeaponData.TraceRadius,  // mercy de visée, §11 — 0 équivaut à un line trace
     TraceChannel = Weapon,            // canal custom à créer, 06_CONVENTIONS §7, réponse défaut = Block
     bTraceComplex = FALSE,            // non négociable
     bReturnPhysicalMaterial = TRUE,   // choix du VFX d'impact
@@ -158,10 +159,13 @@ LineTraceByChannel(
   de vitesse relative il est coûteux, imprécis, et dépendant de la topologie du mesh. Une sphère est gratuite,
   déterministe et se règle visuellement.
 > **Écarts constatés à l'implémentation (J8) — cette note fait foi sur le code réel.**
+> - **Le nœud réel est `Collision|SphereTraceByChannel`**, pas `Line Trace By Channel` — décision de
+>   Louis du 2026-08-20, cf. **§11**. C'est le **seul** trace de gameplay du tir : un par tir.
+>   `Radius` est alimenté par `WeaponData.TraceRadius`.
 > - Le canal `Weapon` est **`ECC_GameTraceChannel3`** et se pose sur le pin `TraceChannel` sous la
 >   valeur **`TraceTypeQuery3`** (prouvé, cf. `12_PIEGES_OUTILLAGE 5.18`).
-> - **`bReturnPhysicalMaterial` n'existe pas** sur le nœud Blueprint `Line Trace By Channel`
->   (`UKismetSystemLibrary::LineTraceSingle` ne l'expose pas). Le pin `PhysMat` du `Break Hit Result`
+> - **`bReturnPhysicalMaterial` n'existe pas** sur les nœuds Blueprint de trace simple
+>   (`UKismetSystemLibrary::SphereTraceSingle` ne l'expose pas). Le pin `PhysMat` du `Break Hit Result`
 >   restera donc vide. Sans conséquence au J8 : il ne sert qu'au choix du VFX/SFX d'impact décor (J14).
 >   Si le J14 en a besoin, la parade Blueprint est un `Line Trace By Profile`/`ForObjects`
 >   ou la lecture du `PhysicalMaterial` du composant touché — **jamais** du C++ (R1).
@@ -173,7 +177,8 @@ LineTraceByChannel(
 - **`bTraceComplex = false`** : le complex trace est coûteux et ne sert à rien ici — la discrimination
   corps / tête vient du **composant touché**, pas de la géométrie.
 - `bReturnPhysicalMaterial` ne sert qu'au choix du VFX/SFX d'impact sur le décor, jamais à la logique de hit.
-- Trace unique, non-multi. Pas de pénétration, pas de ricochet, pas de spread (`Laser_Spread = 0`).
+- **Trace unique, non-multi.** Pas de pénétration, pas de ricochet, pas de spread (`Laser_Spread = 0`),
+  et **aucune seconde passe** : l'épaisseur du trace *est* toute l'aide à la visée (§11).
 
 ### 3.4 Trace de confirmation muzzle (`bUseMuzzleConfirmTrace`, défaut `false`)
 Cas limite : joueur collé à un mur, la caméra voit par-dessus, le canon est *dans* le mur. Si activé, après un
@@ -607,68 +612,109 @@ aucun VFX de combat ne doit être rouge vif hors télégraphe de danger.
 Rappel de la contrainte v2 : **le fond est clair**, donc tout VFX de combat a besoin d'un **cœur foncé ou
 très saturé** — un additif seul se délave et disparaît (§3.2).
 
-## 11. Aide à la visée
-| Option | Pour | Contre | Verdict |
-|---|---|---|---|
-| **A. Rien** (`Laser_TraceRadius = 0`) | Pureté, headshots 100 % mérités | À 3000 uu/s + strafe le taux de touche s'effondre → le joueur ralentit pour toucher → **contredit le pilier n°1** | Rejeté seul |
-| **B. Magnétisme / snap** | Confort max | Le réticule bouge tout seul et se bat avec un 180° en air strafe ; headshots gratuits ou impossibles selon la cible la plus proche ; coûteux en BP | **Rejeté** |
-| **C. `TraceRadius` > 0** | 1 valeur à changer, déjà prévue en tuning, prévisible | Un rayon trop gros donne des headshots involontaires | **Retenu, en 2 passes** |
+## 11. Aide à la visée — **un seul sphere trace, dégâts pleins**
+
+### La décision, dans les termes de Louis (2026-08-20, J8nonies)
+
+> *« Au lieu d'un line trace ce soit un sphere trace pour être légèrement plus permissif.
+> Je ne veux pas de réduction de dégâts et de traces qui sont effectués. C'est juste pour avoir
+> un peu de mercy avec le joueur, c'est aussi simple que ça. Pour avoir la sensation que c'est ok.
+> C'est pour ça que le radius ne doit pas être aberrant parce que ça se verrait trop, mais plutôt
+> que le joueur n'ait pas la frustration d'avoir l'impression de toucher alors qu'il passe à 4 px près. »*
+
+L'intention n'est **pas** un système d'assistance : c'est un **épaississement du rayon de tir**.
+Le joueur ne doit ni le voir, ni savoir qu'il existe. Tout ce qui rend l'aide *observable* —
+seconde passe, dégâts réduits, headshot refusé — la trahit et est donc **hors de la demande**.
+
+| Option | Verdict |
+|---|---|
+| **A. Rien** (`Laser_TraceRadius = 0`) | Rejeté : à 3000 uu/s le taux de touche s'effondre, le joueur ralentit pour toucher → contredit le pilier n°1 |
+| **B. Magnétisme / snap** | **Rejeté** : le réticule bouge tout seul, se bat avec un 180° en air strafe, coûteux en BP |
+| **C. `TraceRadius` > 0, trace unique** | **RETENU** — 1 valeur à changer, 1 trace par tir, aucune branche |
+
+### Le code réel
+
 ```
 ResolveShot():
-    Hit1 = LineTraceByChannel(Camera → Range, Weapon)          // passe 1 : précision pure
-    if (Hit1.bBlockingHit) return Hit1                         // headshot possible ICI uniquement
-    if (WeaponData.TraceRadius > 0):                           // passe 2 : assistance, corps seulement
-        Hit2 = SphereTraceByChannel(Camera → Range, TraceRadius, Weapon)
-        if (Hit2.bBlockingHit && Hit2.Actor implements BPI_Damageable):
-            bAssisted = true                                   // ⚠ force bHeadshot = false en aval
-            return Hit2
-    return miss
+    Hit = SphereTraceByChannel(
+            Start          = OwnerController.PlayerCameraManager.GetCameraLocation(),
+            End            = Start + ControlRotation.ForwardVector * WeaponData.Range,
+            Radius         = WeaponData.TraceRadius,        // 07_TUNING §11
+            TraceChannel   = Weapon (TraceTypeQuery3),
+            bTraceComplex  = false,
+            ActorsToIgnore = [OwnerCharacter],
+            bIgnoreSelf    = true)
+    return (Hit, Hit.bBlockingHit)
 ```
-La passe 2 ne se déclenche **que si la passe 1 rate tout** : elle ne peut ni dégrader un tir précis, ni voler un
-headshot. Un hit issu de la passe 2 est traité comme un **body shot quel que soit le composant touché** — même
-si le sphere trace a accroché la `HeadHitbox`, `IsHeadshot()` n'est pas consulté : **l'assistance ne donne
-jamais de headshot**, la récompense reste au skill.
-Filtrée sur les acteurs `BPI_Damageable` : jamais d'assistance qui fait toucher un mur. Valeur :
-`Laser_TraceRadius` (`07_TUNING §11`) ; protocole de playtest : monter par paliers depuis 0
-jusqu'au confort à `3000 uu/s`, sans dépasser le rayon de la capsule ennemie, puis consigner dans `07_TUNING §18`.
 
-> ### État d'implémentation — J8sept : implémenté **littéralement**, et ça pose une question à trancher
+Trois règles, et il n'y en a pas d'autre :
+
+1. **Un seul trace par tir.** Pas de passe de rattrapage, pas de trace multi, pas de garde
+   d'occlusion, pas de notion de « tir assisté ». Un sphere trace s'arrête sur le **premier**
+   bloquant rencontré, mur compris — donc on ne tire jamais à travers un mur, gratuitement,
+   sans code dédié. C'est ce qui rend le modèle en 2 passes inutile.
+2. **Aucune réduction de dégâts.** Un headshot obtenu par le rayon de la sphère est un headshot
+   **plein**, `Laser_Damage_Body × Laser_HeadshotMultiplier` = 150 pv. `TryFire` passe le résultat
+   d'`IsHeadshot()` **directement** à `ProcessHit`, sans condition.
+3. **Le rayon reste petit.** Il ne doit pas se voir. `Laser_TraceRadius` (`07_TUNING §11`) est
+   **le** curseur de la mercy : monter si le joueur a l'impression de rater ce qu'il touchait,
+   descendre si des tirs manifestement ratés touchent quand même.
+
+> ### État d'implémentation — J8nonies : le pseudo-code ci-dessus EST le code réel
 >
-> `ResolveShot` (30 nœuds) implémente le pseudo-code ci-dessus **au mot près**, sortie `bAssisted`
-> comprise, et `TryFire` force `bHeadshot = IsHeadshot(Hit) AND NOT bAssisted`. Prouvé en PIE :
-> un tir dont la passe 1 rate tout et dont la passe 2 accroche la `HeadHitbox` inflige **50 pv**
-> (corps), pas 150 — l'assistance ne donne jamais de headshot.
+> `BP_LaserWeapon.ResolveShot` = **15 nœuds** (36 au J8oct), **un seul nœud de trace**
+> (`Collision|SphereTraceByChannel`), une seule chaîne d'exec, un seul `ReturnNode`, zéro nœud mort.
+> Signature : `(Hit : HitResult, bBlockingHit : bool)` — la sortie `bAssisted` **n'existe plus**.
+> Dans l'`EventGraph`, `IsHeadshot(Hit)` alimente `ProcessHit.bHeadshot` **en direct** (le `NOT` et
+> le `AND` ont été supprimés).
 >
-> **⚠️ CONTRADICTION MESURÉE, non résolue par moi — décision de Louis attendue.**
-> La condition d'entrée de la passe 2 est `!Hit1.bBlockingHit`, c'est-à-dire *« la passe 1 n'a
-> touché **rien du tout** sur 15 000 uu »*. Or le canal `Weapon` est **Block** sur `OD_LevelGeo`
-> (§3.3, piège 1) : **dans un niveau fermé, il y a presque toujours un mur derrière l'ennemi.**
+> **Prouvé en PIE le 2026-08-20** avec `TraceRadius = 12`, `MaxHealth = 100`, `BodyDamage = 50`,
+> joueur à `(0, −3000, 300)`, cible à `(1000, −5000, 90)` (corps 60 × 60 × 180) :
 >
-> Mesure PIE du J8sept, tir volontairement à 45 uu à côté d'une cible (soit 11 uu à côté du corps,
-> largement dans le rayon de 25) : la passe 1 a touché **le mur situé 442 uu derrière la cible**
-> (`BeamEnd` à 2678 uu, cible à 2236) → la passe 2 ne s'est **pas** déclenchée → **0 dégât**.
-> Le seul tir assisté que j'ai pu produire est un tir vers **le ciel** (la passe 1 ne rencontrait
-> réellement rien).
+> | Cas | Visée | Attendu | Mesuré |
+> |---|---|---|---|
+> | 1 | corps, plein centre | `−50` | `100 → 50`, `BeamEnd (979, −4970, 91.3)` à 2200.7 uu |
+> | 2 | `HeadHitbox` (z = 165) | 1 coup | **acteur détruit**, `BeamEnd` à **exactement 50.0 uu** du centre de la sphère de tête |
+> | 3 | **8 uu à côté du corps** (dans le rayon) | `−50` | `100 → 50`, `BeamEnd (1030.0, −4970.0, 90.6)` = **l'arête du corps** |
+> | 4 | **30 uu à côté** (hors rayon) | `0` | les 7 cibles restent à `100`, faisceau **au-delà**, sur le mur à 2602 uu |
+> | 5 | mur en face à 1000 uu | `0` + beam arrêté | `0` dégât, `BeamEnd` à **1000.0 uu** |
 >
-> **Conséquence : tel qu'écrit, `Laser_TraceRadius` n'aidera presque jamais en jeu réel.** Il aide
-> uniquement les tirs vers le vide — exactement les tirs que le joueur sait déjà avoir ratés.
-> Le symptôme sera « le tuning ne change rien », pas une erreur.
+> Le cas 1 mesure 2200.7 uu contre 2203.4 au J8oct : l'impact tombe **2.7 uu plus tôt**, c'est le
+> rayon de la sphère sur une face rasante. Invisible en jeu, et c'est le seul effet du changement
+> sur un tir précis.
 >
-> **Les deux corrections possibles** (aucune n'est appliquée, elles changent le comportement) :
-> 1. **Gate sur la cible, pas sur le vide** — la passe 2 se déclenche si la passe 1 n'a pas touché
->    d'acteur `BPI_Damageable` (mur compris). Il faut alors **rejeter un hit de passe 2 plus
->    lointain que le hit de passe 1**, sinon on tire à travers les murs.
-> 2. **Une seule passe `SphereTraceMulti`** : trier les hits, prendre le `BPI_Damageable` le plus
->    proche s'il est devant le premier bloquant non-damageable, sinon ce dernier. Une trace au lieu
->    de deux, mais s'éloigne du pseudo-code voté.
+> #### 🕮 Note historique — le modèle à 2 passes, construit puis retiré
 >
-> Tant que la question n'est pas tranchée, **le comportement en place est celui de la spec**.
+> *Des J8sept au J8oct, ce §11 décrivait une option « C, retenue en 2 passes » : `LineTrace` de
+> précision, puis `MultiSphereTraceByChannel` de rattrapage, gate sur « je n'ai pas touché de
+> cible », garde d'occlusion `(NOT Hit1.bBlockingHit) OR (h.Distance < Hit1.Distance)`, sortie
+> `bAssisted`, et la règle « **l'assistance ne donne jamais de headshot** » — `TryFire` forçait
+> `bHeadshot = IsHeadshot(Hit) AND NOT bAssisted`.*
+>
+> *Cette machinerie était correcte et prouvée en PIE. Elle a été **retirée le 2026-08-20** parce
+> qu'elle ne servait pas l'intention : Louis ne demandait pas un système d'assistance à arbitrer,
+> il demandait de ne pas rater à 4 px près. Les 21 nœuds de la seconde passe résolvaient un problème
+> de game design que personne n'avait posé, et la règle « pas de headshot assisté » **contredit
+> explicitement** « je ne veux pas de réduction de dégât ».*
+>
+> *Ce qui reste vrai de cet épisode et ne doit pas être reperdu :*
+> - *Le piège `12_PIEGES §6.24` — « une aide conditionnée à *n'avoir rien touché* est morte dans un
+>   niveau fermé » — reste valable pour toute future condition de ce type. Le trace unique le rend
+>   sans objet ici : il n'y a plus de gate du tout.*
+> - *La sortie de `ResolveShot` doit renvoyer le **vrai** `bBlockingHit` du trace, jamais un littéral,
+>   sinon le faisceau cesse de s'arrêter sur les murs et file à 15 000 uu. Cas 5 ci-dessus.*
+> - *`SPEC_ENEMIES` : le rayon de la `HeadHitbox` (50 uu) a été dimensionné pour battre la
+>   demi-diagonale du corps (`12_PIEGES §6.23`), indépendamment de tout ceci.*
 
 ## 12. Checklist de validation manuelle
 **Laser** — [ ] 1 clic = 1 tir, maintenir ne tire pas en rafale · [ ] le beam part du canon et finit sous le
 réticule · [ ] tir à bout portant contre un mur : ne traverse pas · [ ] tirer en pleine course ne change ni
 vitesse ni trajectoire · [ ] une cible à `Laser_Range` est touchée · [ ] le recoil bouge la caméra mais le tir
 suivant part au centre du réticule.
+
+**Mercy de visée (§11)** — [ ] je ne vois **pas** que le tir est épaissi : rien ne touche que je sache
+avoir raté · [ ] un tir qui passe « à 4 px » d'un ennemi en pleine course touche · [ ] les headshots
+sont toujours ceux que je vise, et ils tuent en un coup (aucun `−50` surprise sur un tir de tête).
 
 **Heat** — [ ] ~9 tirs déclenchent l'overheat, le tir déclencheur part quand même · [ ] en overheat : tir
 bloqué, melee/dash/slide/wall ride **fonctionnels** · [ ] le clic en overheat produit un son de refus, pas un
@@ -706,7 +752,7 @@ mon rythme · [ ] j'ai voulu refaire un wall slam immédiatement après le premi
 | # | Piège | Parade |
 |---|---|---|
 | 1 | **Trace caméra qui traverse un mur collé** : la caméra est en retrait de la capsule ; collé à un mur le trace démarre *dans* le collider et ne le détecte pas. | Canal `Weapon` = **Block** sur `OD_LevelGeo`. Ne jamais sortir la caméra de la capsule. Activer `bUseMuzzleConfirmTrace` (§3.4) **uniquement** si le cas se produit en playtest. |
-| 2 | **La capsule englobe la tête** : le trace unique retourne le premier bloquant, donc la capsule (corps) même quand le joueur vise le crâne → headshot impossible. | La `SphereCollision` `Head` doit **déborder** la capsule au niveau de la tête (elle est volontairement généreuse, §5.1) ; se règle dans le viewport en 30 s. Si un cas résiduel apparaît en playtest, passer la passe 1 en `LineTraceMulti` et **prioriser `HeadHitbox`** si les deux composants sont touchés. |
+| 2 | **La capsule englobe la tête** : le trace unique retourne le premier bloquant, donc la capsule (corps) même quand le joueur vise le crâne → headshot impossible. | La `SphereCollision` `Head` doit **déborder** la capsule au niveau de la tête (elle est volontairement généreuse, §5.1) ; se règle dans le viewport en 30 s. Si un cas résiduel apparaît en playtest, passer le trace de §3.3 en variante `Multi` et **prioriser `HeadHitbox`** si les deux composants sont touchés. |
 | 3 | **Optimisations d'anim et hitbox.** Avec un physics asset, `URO` faisait retarder les corps sur le mesh → headshots fantômes. | **Non applicable** : D4 supprime le physics asset. La hitbox est une sphère large attachée à un socket, tolérante à un léger retard de pose → le tick de pose n'est **pas critique pour la validité du hit**. `SPEC_ENEMIES §12.4` fait foi : **`Only Tick Pose When Rendered` + URO activés** sur les meshes d'ennemi. |
 | 4 | **`Global Time Dilation` casse les timers** : un timer armé sous dilatation est compté en temps monde. | La durée d'un hit-stop est en **temps réel** : armer la sortie sur un timer non affecté par la dilatation (§5.4). Un seul appelant, `BPC_HitStop` sur `PC_Overdrive`. Restaurer `1.0` dans `EndPlay` et au `BeginPlay`. Vérifier `Min Global Time Dilation`. |
 | 5 | **Multi-hit du sphere trace** : `SphereTraceMulti` renvoie un `HitResult` **par composant bloquant** → capsule + `HeadHitbox` (+ `WeakPointHitbox` sur le Tank) = un ennemi prend 2 à 3× les dégâts melee. | `HitActorsThisSwing : Array<Actor>` vidé à chaque swing, `Contains()` avant traitement (§6). Le dédoublonnage se fait **par acteur**, jamais par composant. |

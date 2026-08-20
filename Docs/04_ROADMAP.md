@@ -500,18 +500,48 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       tir assisté hors du cube `→ −50`, **pas −150** · tir au mur `→ 0 dégât`, et un tir rasant une
       arête de mur ressort à **15 000 uu** (le filtre `BPI_Damageable` jette le mur).
 - [x] **Test manche en main (R8/R10)** : le headshot se sent, l'assistance ne vole rien → → ✅ **VALIDÉ par Louis le 2026-08-20** : « tout est good pour moi, le game feel commence vraiment à être sympa »
-- [!] **DETTE J8 — `Laser_TraceRadius = 25` NE PILOTE RIEN.** La passe 2 de `SPEC_COMBAT §11` ne se
-      déclenche que si la passe 1 « ne touche rien », or le canal `Weapon` bloque le décor : dans un
-      niveau fermé la passe 1 touche presque toujours le mur derrière la cible. **Mesuré** : tir à 11 uu
-      du corps → passe 1 sur le mur 442 uu derrière → aucune assistance, 0 dégât.
-      → C'est **la famille D40 / `AddSpeedGain`** : une valeur de tuning qui n'a aucun effet et que
-      personne ne remarque. À solder **avant le J12** (premiers vrais ennemis), sinon on calibrera la
-      difficulté de tir sur une assistance fantôme.
-      → Correctif retenu, non implémenté : la passe 2 se déclenche quand la passe 1 n'a pas touché un
-      acteur **`BPI_Damageable`** (au lieu de « rien »), et le hit assisté n'est accepté que s'il est
-      **plus proche** que l'impact bloquant de la passe 1 — ce qui interdit de tirer à travers un mur.
-      Détail : `SPEC_COMBAT §11` (encadré) et `12_PIEGES §6.24`.
-      **en attente du playtest de Louis**
+- [x] **DETTE J8 SOLDÉE — `Laser_TraceRadius = 25` pilote enfin l'aide à la visée** *(2026-08-20, J8oct)*.
+      Symptôme d'origine : la passe 2 de `SPEC_COMBAT §11` ne se déclenchait que si la passe 1 « ne
+      touchait rien », or le canal `Weapon` bloque le décor → en niveau fermé la passe 1 touchait
+      presque toujours le mur derrière la cible (**mesuré** : tir à 11 uu du corps → passe 1 sur le mur
+      442 uu derrière → 0 dégât). C'était la famille D40 / `AddSpeedGain` : une clé de tuning sans effet.
+      → **Ce qui a changé dans `BP_LaserWeapon.ResolveShot` (30 → 36 nœuds)** : (1) le gate porte sur
+      « la passe 1 a-t-elle touché une **cible** `BPI_Damageable` » et non plus « a-t-elle touché
+      quelque chose » ; (2) la passe 2 est un **`SphereTraceMultiByChannel`** parcouru par un
+      `ForEachLoopWithBreak` qui retient le **premier** hit `BPI_Damageable` ; (3) **garde d'occlusion**
+      `(NOT Hit1.bBlockingHit) OR (h.Distance < Hit1.Distance)`, sinon `break` — on ne tire jamais à
+      travers un mur ; (4) **la sortie finale renvoie `Hit1` avec son vrai `bBlockingHit`**, ce qui fait
+      ressortir l'impact décor et empêche le faisceau de filer à 15 000 uu.
+      → **Prouvé en PIE, 7 mesures** : corps précis `−50` · tête précise `one-shot` · **tir à 11 uu du
+      corps avec mur derrière `−50`** (était `0`) · assisté sur `HeadHitbox` `−50` et pas `−150` ·
+      mur avec cible 1182 uu derrière `0 dégât`, faisceau **sur le mur** à 3642 uu · mur simple 1000 uu ·
+      miss total 15 000 uu. `07_TUNING §11` repassé en `À CALIBRER`, `SPEC_COMBAT §11` réécrit.
+      ⚠️ **Correctif final : ce n'est PAS la forme retenue.** Voir la ligne suivante.
+- [x] **CORRECTIF FINAL DE LA DETTE J8 — un SEUL sphere trace** *(2026-08-20, J8nonies)*.
+      Louis a reformulé sa demande : *« au lieu d'un line trace ce soit un sphere trace pour être
+      légèrement plus permissif. Je ne veux pas de réduction de dégâts et de traces qui sont effectués.
+      C'est juste pour avoir un peu de mercy avec le joueur. »* Le modèle à 2 passes du J8oct était une
+      **sur-interprétation** : il compliquait sans servir l'intention, et sa règle « l'assistance ne
+      donne jamais de headshot » contredisait « je ne veux pas de réduction de dégât ».
+      → **`ResolveShot` : 36 → 15 nœuds.** Le `LineTraceByChannel`, le `MultiSphereTraceByChannel`, la
+      boucle `ForEachLoopWithBreak`, la garde d'occlusion, les 4 `Branch` et 3 des 4 `ReturnNode` sont
+      **supprimés**. Il reste **un** `Collision|SphereTraceByChannel` (caméra → `ControlRotation` brute
+      × `Range`, rayon `WeaponData.TraceRadius`, canal `TraceTypeQuery3`, `bTraceComplex = false`,
+      `ActorsToIgnore = [OwnerCharacter]`, `bIgnoreSelf = true`) et un `ReturnNode`.
+      → **Sortie `bAssisted` supprimée** de la signature ; dans l'`EventGraph` (32 → 30 nœuds) le `NOT`
+      et le `AND` disparaissent, `IsHeadshot` alimente `ProcessHit.bHeadshot` **en direct** :
+      **un headshot obtenu par le rayon vaut 150 pv pleins.**
+      → **`Laser_TraceRadius : 25 → 12`** (`07_TUNING §11`) — 25 avait été dimensionné pour l'ancien
+      design et n'a jamais été joué ; sur un corps de 60 uu il se verrait. **12 est le curseur** :
+      20 si trop sec, 6 si ça touche des choses ratées.
+      → **Prouvé en PIE, 5 mesures** (`TraceRadius = 12`) : corps précis `100 → 50` · tête précise
+      **détruite en 1 coup**, impact à exactement 50.0 uu du centre de la `HeadHitbox` · **8 uu à côté
+      du corps `−50`**, impact sur l'arête `(1030, −4970)` · **30 uu à côté `0 dégât`**, faisceau
+      au-delà sur le mur à 2602 uu · mur en face **`0` et faisceau arrêté à 1000.0 uu**.
+      → Audits : 1 racine exec / **0 nœud mort** dans les deux graphes, **un seul `type_id` de trace**
+      dans `ResolveShot`, tous les `self` directs (2.21), compilation `warnings_as_errors = True` verte.
+      `SPEC_COMBAT §11` réécrit (le modèle 2 passes devient une note historique), §2/§3.1/§3.3/§12 alignés.
+      **en attente du playtest de Louis (R8 / R10) — aucun commit**
 
 > Reporté hors J8, volontairement : `ApplyRecoil` (`§3.6`, exige un
 > `BP_PlayerCameraManager` custom → J14), gate heat (J9), gate health (J12),
