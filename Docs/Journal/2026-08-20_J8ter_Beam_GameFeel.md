@@ -140,7 +140,9 @@ de jeu. Échafaudage **restauré et revérifié** : `IMC_Debug` remis à son uni
   `LaserDebug_AttachTime` / `GlowWidthMult` / `GlowAlphaMult` / `BeamDuration` directement dans le
   panneau `Debug` de `ChildActor_Laser` en PIE. ⚠️ Toute valeur retenue doit être reportée
   **dans `07_TUNING §16`** *et* sur le CDO + le `ChildActorTemplate`.
-- Reste ouvert du J8 : cocher `Pure` sur `IsHeadshot`, et `BPI_Damageable` sur `BP_TargetDummy`.
+- ~~Reste ouvert du J8~~ → **soldé le 2026-08-20** : `Pure` coché sur `IsHeadshot` (vérifié : plus de
+  pin d'exec sur le nœud d'appel), et `BPI_Damageable` implémentée sur `BP_TargetDummy`.
+- *(ligne d'origine)* Reste ouvert du J8 : cocher `Pure` sur `IsHeadshot`, et `BPI_Damageable` sur `BP_TargetDummy`.
 
 ---
 
