@@ -64,10 +64,10 @@ socket `S_Weapon` de `SK_PlayerArms`). **Tick désactivé** — sauf la dérogat
 | `bCanFire` | Bool | Gate du cooldown |
 | `bUseMuzzleConfirmTrace` | Bool | Défaut `false` (§3.4) |
 | `TryFire()` | Event | Point d'entrée unique depuis `IA_Fire` (§3) |
-| `ResolveShot()` | Function | Traces + point d'impact. **Aucun effet de bord.** |
+| `ResolveShot()` | Function | Traces + point d'impact. **Aucun effet de bord.** Sorties : `Hit`, `bBlockingHit`, **`bAssisted`** (J8sept, §11) |
 | `ProcessHit(Hit, bHeadshot)` | Function | Construit `S_DamageInfo`, appelle `BPI_Damageable` |
 | `PlayFireFX(ImpactPoint, Hit)` | Function | VFX/SFX/shake/recoil. **Aucune logique de gameplay.** **Ne dessine plus le faisceau : il l'arme** (`BeamEnd` + `BeamTimeRemaining`, cf. §2 dérogation). |
-| `IsHeadshot(Hit)` | Pure | `Hit.Component == Cible.HeadHitbox` — **jamais** `Hit.BoneName` (§5.1) |
+| `IsHeadshot(Hit)` | Pure | **`Hit.Component.ComponentHasTag("Head")`** — **jamais** `Hit.BoneName` (§5.1, encadré « écart d'implémentation ») |
 | `EndFireCooldown()` | Event | Callback timer → `bCanFire = true` |
 | `BeamStart` | Vector, cat. `Debug`, **non** `Instance Editable` | **PROVISOIRE J8bis→J14.** Origine du faisceau. Posée à `Muzzle.GetWorldLocation()` par `PlayFireFX`, **réécrite chaque frame par `UpdateBeam` tant que `Elapsed < LaserDebug_AttachTime`**, puis **figée en espace monde**. C'est le décrochage qui supprime la duplication de rayons (§13 piège 10bis). |
 | `BeamEnd` | Vector, cat. `Debug` | **PROVISOIRE J8→J14.** Bout du faisceau, figé à l'émission : `Hit.ImpactPoint`, ou `Hit.TraceEnd` (= `Start + Dir × Range`) si le tir part à vide. |
@@ -99,7 +99,8 @@ TryFire():
     bCanFire = false
     SetTimerByEvent(EndFireCooldown, WeaponData.FireCooldown)   // 07_TUNING §11 Laser_FireCooldown
     ShotResult = ResolveShot()                                  // §3.2-3.4 + §11
-    if (ShotResult.bBlockingHit): ProcessHit(ShotResult.Hit, IsHeadshot(ShotResult.Hit))   // §3.5
+    if (ShotResult.bBlockingHit):
+        ProcessHit(ShotResult.Hit, IsHeadshot(ShotResult.Hit) AND NOT ShotResult.bAssisted)  // §3.5 + §11
     PlayFireFX(ShotResult.ImpactPoint, ShotResult.Hit)          // toujours, même à vide
     ApplyRecoil()                                               // §3.6
     BPC_Heat.AddHeat(WeaponData.HeatPerShot)                    // 07_TUNING §11 — TOUJOURS en dernier
@@ -269,6 +270,36 @@ La sphère doit être **généreuse** — elle englobe le crâne et déborde un 
 quelques secondes (`SPEC_ENEMIES §12.11`). Corollaire : comme la hitbox n'épouse plus la silhouette animée,
 le tick de pose n'est plus critique pour la validité du hit — `Only Tick Pose When Rendered` + URO restent
 **activés** (§13.3).
+
+> ### ⚠️ Écart d'implémentation assumé — J8sept. Cette note fait foi sur le code réel.
+>
+> **Le test réel est `Hit.Component.ComponentHasTag("Head")`, pas `Hit.Component == Hit.Actor.HeadHitbox`.**
+>
+> ```
+> IsHeadshot(Hit):
+>     return Hit.Component.ComponentHasTag("Head")     // 4 nœuds, aucun cast
+> ```
+>
+> **Pourquoi.** La comparaison de composant suppose de connaître la classe de la cible pour lire
+> `HeadHitbox` — donc un `Cast<BP_EnemyBase>` **dans l'arme**. Or (a) `BP_EnemyBase` n'existe pas
+> avant le J12, (b) l'arme ne doit pas connaître le type de ce qu'elle touche (`05_ARCHITECTURE`),
+> (c) le Tank aura des `WeakPointHitbox` qui ne sont pas des têtes et le boss d'autres points
+> faibles encore : un tag est extensible, une comparaison de composant nommé ne l'est pas.
+>
+> **Ce que l'écart ne change pas** : l'interdit réel de cette section est **`Hit.BoneName`**, et il
+> tient toujours. La discrimination vient du **composant touché**, comme prévu — on l'identifie
+> simplement par son **tag** au lieu de son nom de variable.
+>
+> **Contrat de nommage** (les deux sont obligatoires sur toute cible) :
+> composant nommé **`HeadHitbox`** · **Component Tag = `Head`**.
+> Un composant sans le tag est un composant corps, sans erreur ni warning — c'est le mode d'échec
+> à surveiller au J12.
+>
+> ⚠️ **Le rayon de la sphère doit dépasser la demi-DIAGONALE du volume du corps, pas sa demi-largeur.**
+> Mesuré au J8sept sur `BP_TargetDummy` (corps 60 × 60) : avec un rayon de 40 uu la tête dépasse de
+> 10 uu de face mais **rentre à l'intérieur du corps dès 45° d'incidence** (demi-diagonale = 42.4 uu),
+> et le headshot devient impossible en approche oblique — c'est-à-dire précisément en pleine course.
+> Rayon retenu : **50 uu** (`07_TUNING §11`). Règle générale : `R_tête > demi_diagonale_corps + marge`.
 
 ### 5.2 Dégâts
 `Damage = Laser_Damage_Body × Laser_HeadshotMultiplier` (`07_TUNING §11`), **puis** : si
@@ -446,6 +477,17 @@ OnHit(Hit):
 | `IsAlive` | — | `bAlive : Bool` | |
 | `GetHealthRatio` | — | `Ratio : Float` | `[pure]` |
 
+> **Écarts constatés à l'implémentation (J8sexies) — cette note fait foi sur l'asset réel.**
+> - `GetHealthRatio` est annotée `[pure]` ci-dessus mais l'asset `BPI_Damageable` la déclare
+>   **impure** : son graphe a un pin `Exec`. Sans conséquence fonctionnelle (elle ne fait que lire) ;
+>   le flag `Pure` n'est pas exposé par l'outillage (`12_PIEGES §5.3`), donc **si on le veut, c'est
+>   Louis qui coche la case sur l'interface**. À trancher au J9 avec `BPC_Health`.
+> - `ApplyKnockback` n'ayant aucune sortie, l'éditeur l'expose en **event** et non en fonction :
+>   elle n'apparaît pas dans `list_graphs`. Normal, rien à corriger. Implémentée au **J11**.
+> - Sur `BP_TargetDummy` (sandbox), la garde `bIsDead` du pseudo-code ci-dessous est transposée en
+>   **`if (CurrentHealth <= 0) return (false, 0)`** en première ligne : le dummy n'a pas de
+>   `BPC_Health` et se détruit immédiatement. Même sémantique, même position, §13 piège 9 couvert.
+
 > **`ApplyKnockback` est appelée APRÈS `ApplyDamage`, par l'appelant** — jamais depuis `ApplyDamage`.
 > Deux raisons : le knockback doit s'appliquer **même si la cible est morte** (un corps projeté reste
 > satisfaisant, et il se dissout en vol, §7.4), et **c'est l'appelant qui sait** s'il veut projeter ou non
@@ -587,8 +629,40 @@ headshot. Un hit issu de la passe 2 est traité comme un **body shot quel que so
 si le sphere trace a accroché la `HeadHitbox`, `IsHeadshot()` n'est pas consulté : **l'assistance ne donne
 jamais de headshot**, la récompense reste au skill.
 Filtrée sur les acteurs `BPI_Damageable` : jamais d'assistance qui fait toucher un mur. Valeur :
-`Laser_TraceRadius` (`07_TUNING §11`, à 0 aujourd'hui) ; protocole de playtest : monter par paliers depuis 0
+`Laser_TraceRadius` (`07_TUNING §11`) ; protocole de playtest : monter par paliers depuis 0
 jusqu'au confort à `3000 uu/s`, sans dépasser le rayon de la capsule ennemie, puis consigner dans `07_TUNING §18`.
+
+> ### État d'implémentation — J8sept : implémenté **littéralement**, et ça pose une question à trancher
+>
+> `ResolveShot` (30 nœuds) implémente le pseudo-code ci-dessus **au mot près**, sortie `bAssisted`
+> comprise, et `TryFire` force `bHeadshot = IsHeadshot(Hit) AND NOT bAssisted`. Prouvé en PIE :
+> un tir dont la passe 1 rate tout et dont la passe 2 accroche la `HeadHitbox` inflige **50 pv**
+> (corps), pas 150 — l'assistance ne donne jamais de headshot.
+>
+> **⚠️ CONTRADICTION MESURÉE, non résolue par moi — décision de Louis attendue.**
+> La condition d'entrée de la passe 2 est `!Hit1.bBlockingHit`, c'est-à-dire *« la passe 1 n'a
+> touché **rien du tout** sur 15 000 uu »*. Or le canal `Weapon` est **Block** sur `OD_LevelGeo`
+> (§3.3, piège 1) : **dans un niveau fermé, il y a presque toujours un mur derrière l'ennemi.**
+>
+> Mesure PIE du J8sept, tir volontairement à 45 uu à côté d'une cible (soit 11 uu à côté du corps,
+> largement dans le rayon de 25) : la passe 1 a touché **le mur situé 442 uu derrière la cible**
+> (`BeamEnd` à 2678 uu, cible à 2236) → la passe 2 ne s'est **pas** déclenchée → **0 dégât**.
+> Le seul tir assisté que j'ai pu produire est un tir vers **le ciel** (la passe 1 ne rencontrait
+> réellement rien).
+>
+> **Conséquence : tel qu'écrit, `Laser_TraceRadius` n'aidera presque jamais en jeu réel.** Il aide
+> uniquement les tirs vers le vide — exactement les tirs que le joueur sait déjà avoir ratés.
+> Le symptôme sera « le tuning ne change rien », pas une erreur.
+>
+> **Les deux corrections possibles** (aucune n'est appliquée, elles changent le comportement) :
+> 1. **Gate sur la cible, pas sur le vide** — la passe 2 se déclenche si la passe 1 n'a pas touché
+>    d'acteur `BPI_Damageable` (mur compris). Il faut alors **rejeter un hit de passe 2 plus
+>    lointain que le hit de passe 1**, sinon on tire à travers les murs.
+> 2. **Une seule passe `SphereTraceMulti`** : trier les hits, prendre le `BPI_Damageable` le plus
+>    proche s'il est devant le premier bloquant non-damageable, sinon ce dernier. Une trace au lieu
+>    de deux, mais s'éloigne du pseudo-code voté.
+>
+> Tant que la question n'est pas tranchée, **le comportement en place est celui de la spec**.
 
 ## 12. Checklist de validation manuelle
 **Laser** — [ ] 1 clic = 1 tir, maintenir ne tire pas en rafale · [ ] le beam part du canon et finit sous le

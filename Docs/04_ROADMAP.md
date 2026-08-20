@@ -393,15 +393,20 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       dégâts via `BPI_Damageable`, cooldown par `Set Timer by Event`
 - [x] `BP_PlayerCharacter` : `WeaponSpring` (SpringArm, montage **provisoire**) + `ChildActor_Laser`,
       `IA_Fire` → `HandleFireInput` → `TryFire`, child actor mis en cache au `BeginPlay` (§13.11)
-- [~] Cibles de test dans le sandbox — `BP_TargetDummy` (`Dev/Sandbox/`, cube 60 × 60 × 180, `MaxHealth`
+- [x] Cibles de test dans le sandbox — `BP_TargetDummy` (`Dev/Sandbox/`, cube 60 × 60 × 180, `MaxHealth`
       `Instance Editable`) et **7 instances placées** dans `L_Sandbox_Movement`, dossier `Sandbox/L_Targets` :
       2 sur la ligne droite d'approche, 2 sur le deck 1 de la zone K, 1 sur le deck 3a après le wall jump,
       2 dans le couloir de wall ride E2. Bases vérifiées **pile** sur leur surface (`get_actor_bounds`).
-      → Elles **bloquent déjà le canal `Weapon`** (collision par défaut), donc la ligne de tir s'y arrête :
-      la visée en course est testable tout de suite.
-      → ⏳ **Reste : cocher `BPI_Damageable` dans « Implemented Interfaces » de `BP_TargetDummy`** — geste
-      manuel, aucun outil ne le fait (`12_PIEGES §5.16`). `ApplyDamage` / `IsAlive` / `GetHealthRatio`
-      seront écrits par outil juste après.
+      → Elles **bloquent déjà le canal `Weapon`** (collision par défaut), donc la ligne de tir s'y arrête.
+      → `BPI_Damageable` cochée à la main par Louis, puis les 3 graphes écrits par outil (J8sexies) :
+      `EventBeginPlay` (`CurrentHealth = MaxHealth`), `ApplyDamage` (garde anti double-kill en première
+      ligne, `Clamp`, `DestroyActor` à la mort, **sphère de debug `OD_Magenta_Player` au `HitLocation`**
+      sinon), `IsAlive`, `GetHealthRatio` (`SafeDivide`, donc `MaxHealth = 0` renvoie 0 sans warning).
+      5 clés `TargetDebug_*` en `Instance Editable` cat. `Debug` (`07_TUNING §16`), posées **sur les
+      7 instances** et pas seulement sur le CDO (`12_PIEGES §5.34`).
+      → **Prouvé en PIE** : `CurrentHealth = 100` au `BeginPlay` sur les 7 ; tir headless via `IMC_Debug`
+      (recette `12_PIEGES §4.11`) → **100 → 66 → 32 → détruite**, soit 3 × `Laser_Damage_Body` = 34,
+      et **un seul hit par tir**. Sphère d'impact confirmée à l'image.
 - [x] **Correctif game feel (retour de Louis manche en main)** — *« le laser ne part pas du muzzle du
       pistolet si on se déplace, on a l'impression qu'il part depuis le vide, et le rayon disparaît
       trop vite »*. `PlayFireFX` **arme** désormais le faisceau (`BeamEnd`, `BeamTimeRemaining`) au
@@ -423,8 +428,8 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       (`LaserDebug_GlowWidthMult` = 5.0, `LaserDebug_GlowAlphaMult` = 0.3, halo dessiné **avant** le
       cœur, même `BeamStart`/`BeamEnd`). Les 3 clés neuves écrites sur le CDO **et** sur le
       `ChildActorTemplate` (`12_PIEGES §5.27`), relevé sur l'instance PIE à l'appui.
-- [ ] **Test** : tirer en courant est naturel → **en attente du playtest de Louis (R8 / R10)**
-- [ ] **Test** : le faisceau part du canon même à 3000 uu/s, **ne se dédouble pas**, et s'efface en
+- [x] **Test** : tirer en courant est naturel → ✅ **VALIDÉ par Louis le 2026-08-20**, manche en main : « j'ai tout testé, tout me convient »
+- [x] **Test** : le faisceau part du canon même à 3000 uu/s, **ne se dédouble pas**, et s'efface en → ✅ **VALIDÉ par Louis le 2026-08-20**, manche en main : « j'ai tout testé, tout me convient »
       fondu doux → **idem**
 
 - [x] **Correctif mouvement × combat (`D53`, tranché par Louis)** — *« comme le slide est orienté avec
@@ -435,7 +440,7 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       `UpdateSlideHeading(dt, AimDir)` (1ᵉʳ nœud exec de `SlideStep`). `Slide_TurnRate`, la norme de la
       vitesse, `D29`, `D31` et le plancher `bForcedSlide` (`D27`) **inchangés**. Clé ajoutée à
       `PDA_MovementData` / `DA_Movement_Default` / `07_TUNING §5`.
-- [ ] **Test** : on peut viser à la souris en slidant sans être dévié, **et** garder le demi-tour
+- [x] **Test** : on peut viser à la souris en slidant sans être dévié, **et** garder le demi-tour → ✅ **VALIDÉ par Louis le 2026-08-20**, manche en main : « j'ai tout testé, tout me convient »
       serré à 0.25 s quand on le veut → **en attente du playtest de Louis (R8 / R10)**
 
 - [x] **Correctif mouvement × combat n°2 (`D54` / `D55` / `D56`, J8quater)** — *« il faudrait faire en
@@ -453,7 +458,7 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       `WallRide_DetachLookAngle` = **90°** de la direction de déplacement, cosinus précalculé au
       `BeginPlay`). `Grounded` (`D45`), `WallJump` (`D48`), l'accroche illimitée (`D47`), le roulis
       (`D49`), le cooldown same-wall et l'anti-héritage de vitesse de dash : **intouchés**.
-- [ ] **Test** : on peut viser à 90° pendant un wall ride **sans jamais décrocher**, et on décroche
+- [x] **Test** : on peut viser à 90° pendant un wall ride **sans jamais décrocher**, et on décroche → ✅ **VALIDÉ par Louis le 2026-08-20**, manche en main : « j'ai tout testé, tout me convient »
       **uniquement** avec la touche opposée au mur → **en attente du playtest de Louis (R8 / R10)**
 
 - [x] **Correctif mouvement n°3 (`D57`, J8quinquies)** — *« j'aimerais avoir le timer du dash oui, mais
@@ -468,15 +473,49 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       `CanEnterState` sont intacts. Clé `Dash_RequiresSurfaceTouch` (défaut `true`) dans
       `PDA_MovementData` / `DA_Movement_Default` / `07_TUNING §8` — la mettre à `false` restaure
       l'ancien comportement à l'identique.
-- [ ] **Test** : **un seul dash par saut**, récupéré au contact du sol **ou** d'un wall ride, et aucune
+- [x] **Test** : **un seul dash par saut**, récupéré au contact du sol **ou** d'un wall ride, et aucune → ✅ **VALIDÉ par Louis le 2026-08-20**, manche en main : « j'ai tout testé, tout me convient »
       régression du J5 (slide → dash → slide, pas de blocage à 5625 uu/s) →
       **en attente du playtest de Louis (R8 / R10)**
 
-> Reporté hors J8, volontairement : passe 2 de l'aide à la visée (`SPEC_COMBAT §11`,
-> `Laser_TraceRadius = 0` → serait du code mort non testable), `ApplyRecoil` (`§3.6`, exige un
+- [x] **Aide à la visée — passe 2 (`SPEC_COMBAT §11`), J8sept** — *« ce n'est pas un line trace mais plus
+      un sphere trace, pour avoir une hitbox beaucoup plus permissive… c'est trop dur surtout avec la
+      speed accumulée »*. `ResolveShot` réécrite (14 → **30** nœuds) : passe 1 line trace, puis
+      **si et seulement si** la passe 1 ne touche rien, `SphereTraceByChannel` de rayon
+      `WeaponData.TraceRadius` (25 uu), **filtrée `BPI_Damageable`**. Nouvelle sortie **`bAssisted`**,
+      et `TryFire` calcule `bHeadshot = IsHeadshot(Hit) AND NOT bAssisted` : **un tir assisté est un
+      body shot quoi qu'il arrive.**
+      ⚠️ **Contradiction mesurée et signalée, non résolue** : en niveau fermé la passe 1 touche
+      toujours un mur, donc l'assistance ne se déclenche quasiment jamais. Encadré dédié dans
+      `SPEC_COMBAT §11` + `12_PIEGES §6.24` — **arbitrage de Louis attendu**.
+- [x] **`IsHeadshot` réel (avancé du J10 au J8sept)** — *« dans la tête ça one shot »*. La fonction ne
+      renvoie plus `false` en dur : **`Hit.Component.ComponentHasTag("Head")`** (4 nœuds, aucun cast).
+      **Écart assumé** vs `SPEC_COMBAT §5.1` (qui prescrivait `Hit.Component == Hit.Actor.HeadHitbox`,
+      donc un cast vers un `BP_EnemyBase` qui n'existe pas) : justifié et écrit dans la spec.
+- [x] **`BP_TargetDummy.HeadHitbox`** — `SphereCollision` enfant de `TargetMesh`, tag `Head`, rayon
+      **50 uu monde**, centre **+75 uu** au-dessus du pivot. Blocage du canal `Weapon` posé **dans le
+      graphe** au `BeginPlay` (`12_PIEGES §5.15`/`§5.26`). Les 7 cibles du sandbox **re-posées**
+      (`12_PIEGES §5.35`). Valeurs dans `07_TUNING §16`.
+- [x] **Test headless (PIE, recette `12_PIEGES §4.11`)** — 4 mesures : 2 tirs au corps `100 → 50 →
+      détruite` · 1 tir dans la tête `→ détruite` (impact relevé **sur la sphère**, pas sur le cube) ·
+      tir assisté hors du cube `→ −50`, **pas −150** · tir au mur `→ 0 dégât`, et un tir rasant une
+      arête de mur ressort à **15 000 uu** (le filtre `BPI_Damageable` jette le mur).
+- [x] **Test manche en main (R8/R10)** : le headshot se sent, l'assistance ne vole rien → → ✅ **VALIDÉ par Louis le 2026-08-20** : « tout est good pour moi, le game feel commence vraiment à être sympa »
+- [!] **DETTE J8 — `Laser_TraceRadius = 25` NE PILOTE RIEN.** La passe 2 de `SPEC_COMBAT §11` ne se
+      déclenche que si la passe 1 « ne touche rien », or le canal `Weapon` bloque le décor : dans un
+      niveau fermé la passe 1 touche presque toujours le mur derrière la cible. **Mesuré** : tir à 11 uu
+      du corps → passe 1 sur le mur 442 uu derrière → aucune assistance, 0 dégât.
+      → C'est **la famille D40 / `AddSpeedGain`** : une valeur de tuning qui n'a aucun effet et que
+      personne ne remarque. À solder **avant le J12** (premiers vrais ennemis), sinon on calibrera la
+      difficulté de tir sur une assistance fantôme.
+      → Correctif retenu, non implémenté : la passe 2 se déclenche quand la passe 1 n'a pas touché un
+      acteur **`BPI_Damageable`** (au lieu de « rien »), et le hit assisté n'est accepté que s'il est
+      **plus proche** que l'impact bloquant de la passe 1 — ce qui interdit de tirer à travers un mur.
+      Détail : `SPEC_COMBAT §11` (encadré) et `12_PIEGES §6.24`.
+      **en attente du playtest de Louis**
+
+> Reporté hors J8, volontairement : `ApplyRecoil` (`§3.6`, exige un
 > `BP_PlayerCameraManager` custom → J14), gate heat (J9), gate health (J12),
-> `bUseMuzzleConfirmTrace` (`§3.4`, défaut `false`), decals / VFX d'impact décor (J14),
-> `IsHeadshot` réel (J10 — `HeadHitbox` n'existe nulle part, la fonction renvoie `false` en dur).
+> `bUseMuzzleConfirmTrace` (`§3.4`, défaut `false`), decals / VFX d'impact décor (J14).
 
 ### J9 — Heat & overheat
 - [ ] `BPC_Heat` : machine à états, décroissance, délai, overheat, sortie
@@ -484,9 +523,11 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 - [ ] **Test** : le rythme tirer/refroidir est lisible sans regarder le HUD
 
 ### J10 — Headshots & feedback
-- [ ] Hitboxes de tête, détection, multiplicateur
+- [x] Hitboxes de tête, détection, multiplicateur — **fait en avance au J8sept** (`ComponentHasTag("Head")`,
+      `BP_TargetDummy.HeadHitbox`, `50 × 3.0 = 150 > 100 pv` prouvé en PIE). Reste à porter sur
+      `BP_EnemyBase` au J12 : composant `HeadHitbox` **+ tag `Head`**, les deux obligatoires.
 - [ ] Hitmarker, hit-stop, son distinct
-- [ ] `BPI_Damageable` + `S_DamageInfo`
+- [x] `BPI_Damageable` + `S_DamageInfo` — faits au J8
 - [ ] **Test** : un headshot procure une vraie satisfaction (Test 4)
 
 ### J11 — Melee & wall slam
@@ -547,6 +588,11 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 
 ### J19 — Rank, résultats & vies
 - [ ] Calcul du rank, `S_RankThresholds`, `PDA_LevelData`
+- [x] `WBP_Crosshair` — **fait en avance au J8** (demande de Louis). Widget autonome, prêt à être
+      embarqué dans `WBP_HUD`. Affiché depuis `PC_Overdrive::BeginPlay` en attendant ; au J19 c'est
+      `WBP_HUD` qui le portera → **retirer l'`AddToViewport` du PC à ce moment-là**
+      (le handle est déjà stocké dans `PC_Overdrive.CrosshairWidget`).
+      Cf. `SPEC_UI_HUD §3.1` + `Docs/Journal/2026-08-20_J8_Crosshair.md`.
 - [ ] `WBP_HUD` complet + `WBP_LivesCounter`
 - [ ] `WBP_Results` + comparaison S RANK vs YOUR RUN
 - [ ] Système de vies : `Run_MaxLives`, `ConsumeLife()`, `WBP_RunFailed` (`11_ARBITRAGES D1/D31`)
@@ -632,7 +678,7 @@ Par ordre de priorité (`Docs/10_DEFINITION_OF_DONE.md §4`) :
 | Semaine | Heures prévues | Heures réelles | Gate passée ? | Décision de scope |
 |---|---|---|---|---|
 | S1 | 20 h | J1→J7 bouclés en **2 jours calendaires** (2026-08-18 → 19) | ✅ **oui**, le 2026-08-19 | **Bunny hop retiré du scope (D52)** — le mouvement v1 compte 6 mécaniques, pas 7. Retrait *par le test*, pas par manque de temps |
-| S2 | 20 h | | | |
+| S2 | 20 h | J8 bouclé le 2026-08-20 (1 jour calendaire, 6 passes de correctifs sur retour manche en main) | — | **Le combat a forcé à retoucher le mouvement** : slide (`D53`), wall ride (`D54/55`), dash (`D57`). Aucune coupe de scope. Dette ouverte : l'aide à la visée ne pilote rien |
 | S3 | 20 h | | | |
 | S4 | 20 h | | | |
 

@@ -36,7 +36,7 @@ portées franches** (Lumen + VSM actifs) qui font varier la luminosité du fond 
 |---|---|
 | **Panneau plein écran** (Results, RunFailed, Loot, menus, pause, settings) | Fond `OD_Navy_Deep` à **92 %** d'opacité · texte principal `OD_White_Pure` · texte secondaire `OD_Grey_Shadow` · bordures `OD_Magenta_Player` 1–2 px |
 | **Élément de HUD sans panneau** (HP, Heat, Dash, Speed, Style, **Vies**, Timer, Kills) | Tracé en **`OD_Navy_Ink`**, avec un **halo blanc de 2 px** (`OD_White_Pure`, opacité 0.9). Pas de panneau, pas de liseré, pas de drop shadow noir |
-| **Crosshair** | `OD_Navy_Ink` bordé de blanc. **Jamais magenta** — il se confondrait avec le laser (`PALETTE.md §7`) |
+| **Crosshair** | **Inversé à l'implémentation (J8)** : traits **blancs** bordés de `OD_Navy_Ink`, point central rouge `#FF1025` — le liseré sombre joue le rôle du halo, dans l'autre sens. Voir **§3.1** pour la justification et la tension de palette ouverte. **Jamais magenta** — il se confondrait avec le laser (`PALETTE.md §7`) |
 | **Accents colorés** (états critiques, paliers) | Toujours des tokens **saturés ou foncés** de `PALETTE.md §2`. Jamais un pastel, jamais un blanc |
 
 **Pourquoi un halo blanc et pas un drop shadow noir** : le drop shadow de la v1 supposait un fond sombre et
@@ -165,20 +165,144 @@ Chaque `Handle_*` **pousse** la valeur dans le sous-widget via une fonction publ
 ne castent jamais et ne cherchent jamais le pawn : ils reçoivent des données par fonction publique, donc
 restent testables seuls dans le designer. Nommage des dispatchers : `On` + fait passé (`06_CONVENTIONS §3`).
 
-### 3.1 `WBP_Crosshair`
-Source `BPC_Heat.OnHeatStateChanged` + `BP_LaserWeapon.OnShotFired(Hit, bHit)` (`SPEC_COMBAT §3` fait foi sur les
-noms de dispatchers du laser). 4 traits fins + point 2 px, **pas de cercle**
-(masque la cible) : épaisseur 2, longueur 6, gap 5 px `[À CALIBRER]`.
-**Couleur : traits `OD_Navy_Ink` bordés de blanc `OD_White_Pure` 1 px** (`PALETTE.md §7`) — foncé au centre,
-halo clair autour : c'est la seule combinaison qui tient devant le ciel, un mur blanc et une ombre portée.
-**Jamais magenta** : le magenta est la couleur du laser, un crosshair magenta se noierait dans son propre
-muzzle flash au moment exact où le joueur en a besoin.
-**États** — Idle : `OD_Navy_Ink` 0.9 · Tir : gap +3 px pendant 0.06 s (`Anim_Fire`) ·
-Heat > `Heat_WarningThreshold` : lerp progressif du **halo** vers `OD_Amber_Heat` (le trait reste foncé) ·
-Overheat : traits `OD_Red_Danger`, écart +4 px, **immobiles** (le clignotement est illisible en course) ·
-sortie : retour animé 0.2 s.
-**Interdit** : crosshair dynamique lié à la vitesse (perte du point de fixation) · crosshair magenta ·
-crosshair blanc.
+### 3.1 `WBP_Crosshair` — **implémenté au J8** (`Content/OVERDRIVE/UI/HUD/WBP_Crosshair`)
+
+Source (à câbler au J19) `BPC_Heat.OnHeatStateChanged` + `BP_LaserWeapon.OnShotFired(Hit, bHit)`
+(`SPEC_COMBAT §3` fait foi sur les noms de dispatchers du laser).
+**4 traits fins + 1 point central, pas de cercle** (un cercle masque la cible), pas de contour de visée.
+
+#### 3.1.1 Pourquoi le contraste vient de la FORME et pas d'une adaptation dynamique
+
+Louis a demandé un réticule *« qui ne se fonde pas dans le décor, donc adapte les couleurs en fonction
+de sur quoi c'est projeté »*. **Cette adaptation est impossible en UMG** : un widget est composité
+**après** la scène et n'a aucun accès au framebuffer qu'il recouvre. La faire vraiment demanderait un
+post-process en mode *Difference* / inversion — hors scope du jour, et il casserait le cel-shading (D2).
+
+**Le résultat demandé est obtenu autrement, et c'est ce que font tous les FPS shippés : le réticule
+porte son propre contraste.** Chaque élément est dessiné **deux fois** :
+
+1. une **couche sombre** `OD_Navy_Ink`, plus large et plus longue de `OutlineWidth` **sur chaque bord** ;
+2. la **couche claire** par-dessus, exactement centrée dessus.
+
+Il en résulte un liseré sombre de 1 px tout autour de chaque trait et du point. Sur un mur blanc en
+plein soleil c'est le liseré qui tient la lecture ; devant une ombre portée c'est la couche claire.
+**Aucun fond ne peut faire disparaître les deux à la fois** — c'est exactement ce que `PALETTE.md §7`
+prescrit pour un élément de HUD sans panneau, appliqué au réticule.
+
+> **Écart assumé avec §1.1** : §1.1 interdit de « dupliquer le widget en blanc derrière lui décalé de
+> 2 px (4 draw calls au lieu d'1) ». Ici le doublage est **concentrique**, pas décalé : il coûte
+> **1 draw call de plus par élément** (10 au total, pas 4 par élément) et ne casse pas à l'animation,
+> puisque les deux couches sont repositionnées par la même fonction. `MI_UI_Halo` reste la solution
+> prévue pour les **textes** du HUD, où un doublage concentrique ne marcherait pas.
+
+#### 3.1.2 Géométrie et valeurs
+
+Toutes exposées en variables `Instance Editable`, catégorie `Feedback|Crosshair`.
+**Aucune n'est en dur dans le graphe** (R3). Elles sont appliquées par `ApplyCrosshairLayout` sur
+`Event PreConstruct` — donc le rendu du designer suit toute modification.
+
+| Clé (variable) | Valeur | Unité | Rôle |
+|---|---|---|---|
+| `Crosshair_LineLength` | **6.0** `[À CALIBRER]` | px | Longueur d'un trait clair |
+| `Crosshair_LineThickness` | **2.0** `[À CALIBRER]` | px | Épaisseur d'un trait clair |
+| `Crosshair_Gap` | **8.0** `[À CALIBRER]` | px | Distance centre → extrémité **intérieure** du trait clair |
+| `Crosshair_DotRadius` | **2.0** `[À CALIBRER]` | px | Demi-côté du point central (→ point de 4 px) |
+| `Crosshair_OutlineWidth` | **1.0** `[À CALIBRER]` | px | Épaisseur du liseré sombre, **sur chaque bord** |
+
+> `Crosshair_Gap` est passé de 5 à **8** : à 5, le liseré du point (rayon 2 + 1) et celui des traits
+> (qui empiète de 1 px vers le centre) ne laissaient plus qu'**1 px de vide** — le réticule se serait lu
+> comme une croix pleine. À 8, le vide fait 4 px et le point se détache. Le « point 2 px » de la v1
+> passe à **4 px** (`DotRadius = 2`) : à 2 px et à 4000 uu/s, il n'existe pas.
+
+Géométrie dérivée (variables `Computed_*`, catégorie `Feedback|Crosshair|Computed`, non éditables) :
+
+```
+LineOffset       = Gap + LineLength / 2                 = 11.0   <- centre du trait, en px du centre ecran
+LineOffsetNeg    = -LineOffset                          = -11.0
+OutlineLength    = LineLength    + 2 x OutlineWidth     =   8.0
+OutlineThickness = LineThickness + 2 x OutlineWidth     =   4.0
+DotSize          = 2 x DotRadius                        =   4.0
+OutlineDotSize   = 2 x DotRadius + 2 x OutlineWidth     =   6.0
+```
+
+Encombrement total **30 × 30 px** (`LineOffset + OutlineLength/2` = 15 px de demi-diagonale),
+compatible avec la case 32×32 de la ligne **C** du tableau §2.
+
+#### 3.1.3 Arbre de widgets
+
+`CanvasPanel CrosshairRoot` — tous les enfants ancrés `(0.5, 0.5)`, alignment `(0.5, 0.5)`,
+`bAutoSize = false`. **La couche sombre est déclarée en premier** (`ZOrder 0`), la couche claire
+ensuite (`ZOrder 1`) : l'ordre du Canvas *et* le `ZOrder` disent la même chose, volontairement.
+
+| Widget | ZOrder | Position (x, y) | Taille (w × h) | Couleur |
+|---|---|---|---|---|
+| `Outline_Top` | 0 | `0, LineOffsetNeg` | `OutlineThickness × OutlineLength` | `Crosshair_OutlineColor` |
+| `Outline_Bottom` | 0 | `0, LineOffset` | `OutlineThickness × OutlineLength` | `Crosshair_OutlineColor` |
+| `Outline_Left` | 0 | `LineOffsetNeg, 0` | `OutlineLength × OutlineThickness` | `Crosshair_OutlineColor` |
+| `Outline_Right` | 0 | `LineOffset, 0` | `OutlineLength × OutlineThickness` | `Crosshair_OutlineColor` |
+| `Outline_Dot` | 0 | `0, 0` | `OutlineDotSize × OutlineDotSize` | `Crosshair_OutlineColor` |
+| `Line_Top` | 1 | `0, LineOffsetNeg` | `LineThickness × LineLength` | `Crosshair_LineColor` |
+| `Line_Bottom` | 1 | `0, LineOffset` | `LineThickness × LineLength` | `Crosshair_LineColor` |
+| `Line_Left` | 1 | `LineOffsetNeg, 0` | `LineLength × LineThickness` | `Crosshair_LineColor` |
+| `Line_Right` | 1 | `LineOffset, 0` | `LineLength × LineThickness` | `Crosshair_LineColor` |
+| `Dot_Center` | 1 | `0, 0` | `DotSize × DotSize` | `Crosshair_DotColor` |
+
+Les 11 widgets (racine comprise) sont en **`Visibility = HitTestInvisible`** : le réticule ne doit
+jamais intercepter un clic. Les `Image` n'ont **aucune texture** (`resourceObject = None`,
+`drawAs = Image`) — Slate rend un quad plein, teinté par `ColorAndOpacity`. Zéro asset de texture.
+
+#### 3.1.4 Couleurs — **HEX sRGB et valeur linéaire**
+
+⚠️ `12_PIEGES §5.31` : aucun setter MCP ne convertit le sRGB. **La colonne « linéaire » est celle qui
+est réellement écrite dans l'asset.** Ne jamais recopier le HEX dans un outil.
+
+| Variable | Token | HEX sRGB | Linéaire (R / G / B / A) |
+|---|---|---|---|
+| `Crosshair_OutlineColor` | `OD_Navy_Ink` | `#1B1730` | `0.010960 / 0.008568 / 0.029557 / 1.0` |
+| `Crosshair_LineColor` | `OD_White_Pure` | `#FBFCFE` | `0.964686 / 0.973445 / 0.991102 / 1.0` |
+| `Crosshair_DotColor` | rouge de l'arme | `#FF1025` | `1.000000 / 0.005182 / 0.018500 / 1.0` |
+
+> **Tension de palette ouverte, à trancher par Louis.** `PALETTE.md §7` dit que le crosshair est
+> `OD_Navy_Ink` bordé de blanc, et `11_ARBITRAGES D3` réserve le rouge au **danger** et aux **surfaces
+> de traversée**. Louis a demandé un **point central rouge néon** : c'est fait. Le rouge choisi est
+> `#FF1025`, **celui de l'émissif de l'arme** (`SPEC_ART_DIRECTION §6.4.1`, divergence déjà ouverte et
+> déjà voulue par Louis) — donc ni `OD_Red_Danger` ni `OD_Red_Traversal` ne sont détournés de leur
+> rôle, et le réticule est de la couleur du canon qu'il prolonge.
+> **Alternative si Louis veut garder le rouge strictement exclusif** : `Crosshair_DotColor` =
+> `OD_White_Pure` ou `OD_Navy_Ink` — une seule variable à changer, aucun autre impact.
+
+**Jamais magenta** : le magenta est la couleur du faisceau, un réticule magenta se noierait dans son
+propre muzzle flash au moment exact où le joueur en a besoin.
+
+#### 3.1.5 Graphe
+
+| Fonction | Rôle |
+|---|---|
+| `ComputeCrosshairMetrics()` | Recalcule les 6 `Computed_*` depuis les 5 clés de tuning. N'en **relit** aucune (piège `12_PIEGES 2.3b`). |
+| `ApplyCrosshairElement(Target, PosX, PosY, SizeX, SizeY, Tint)` | `SlotAsCanvasSlot` → `SetPosition` → `SetSize` → `SetColorAndOpacity`. Le seul endroit qui touche un slot. |
+| `ApplyCrosshairLayout()` | `ComputeCrosshairMetrics` puis 10 × `ApplyCrosshairElement`. |
+
+`Event PreConstruct → ApplyCrosshairLayout`. **Aucun `Event Tick`, aucun Property Binding** (§3.0).
+
+#### 3.1.6 Affichage
+
+Créé et affiché par **`PC_Overdrive::BeginPlay`** (`Create Widget` → `Set CrosshairWidget` →
+`Add to Viewport`, `ZOrder = Crosshair_ZOrder` = **10**, cf. §2). Le propriétaire est le
+**PlayerController** et non le pawn : il survit au respawn, même raisonnement que `BPC_HitStop`
+(`SPEC_COMBAT §5.4`). **Au J19, `WBP_HUD` reprend cette responsabilité et l'`AddToViewport` du PC
+disparaît** — le handle est déjà là (`PC_Overdrive.CrosshairWidget`, type `UserWidget`).
+
+#### 3.1.7 États (J19, non implémentés)
+
+Idle : couche claire à 1.0 · Tir : `Crosshair_Gap` +3 px pendant 0.06 s (`Anim_Fire`) ·
+Heat > `Heat_WarningThreshold` : lerp de `Crosshair_LineColor` vers `OD_Amber_Heat`
+(**le liseré sombre ne change jamais** — c'est lui qui garantit la lecture) ·
+Overheat : traits `OD_Red_Danger`, écart +4 px, **immobiles** (le clignotement est illisible en
+course) · sortie : retour animé 0.2 s. Tous ces états ne touchent que les variables de tuning et
+rappellent `ApplyCrosshairLayout` — aucune valeur n'est écrite dans un slot ailleurs.
+
+**Interdit** : crosshair dynamique lié à la vitesse (perte du point de fixation) · crosshair
+magenta · crosshair entièrement blanc · cercle · contour de visée · `Event Tick`.
 
 ### 3.2 `WBP_HealthBar`
 Source `BPC_Health.OnHealthChanged(New,Max,Delta)`. Barre **segmentée en 10 tranches** — on compte des blocs

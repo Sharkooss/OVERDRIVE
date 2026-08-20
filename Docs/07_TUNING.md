@@ -463,12 +463,12 @@ Pas de wall ride sur les props ni sur les ennemis.
 
 | Clé | Valeur | Unité | Statut | Note |
 |---|---|---|---|---|
-| `Laser_Damage_Body` | 34 | pv | À CALIBRER | 3 tirs sur un Grunt |
-| `Laser_Damage_Head` | 100 | pv | À CALIBRER | **one-shot Grunt** (GDD §23) |
+| `Laser_Damage_Body` | **50** | pv | À CALIBRER | **2 tirs sur un Grunt (100 pv).** 34 → 50 le 2026-08-20 sur retour de Louis : « j'aimerais vraiment plutôt tuer en deux coups ». 3 tirs cassaient le rythme en course. |
+| `Laser_Damage_Head` | **150** | pv | À CALIBRER | **dérivé** de `50 × 3.0`. One-shot Grunt garanti (GDD §23), avec 50 pv de marge. |
 | `Laser_HeadshotMultiplier` | 3.0 | × | À CALIBRER | alternative au chiffre absolu |
 | `Laser_Range` | 15000 | uu | À CALIBRER | 150 m |
 | `Laser_FireCooldown` | 0.18 | s | À CALIBRER | ~5.5 tirs/s max, semi-auto |
-| `Laser_TraceRadius` | 0 | uu | À CALIBRER | 0 = line trace pur ; >0 = aide à la visée |
+| `Laser_TraceRadius` | **25** | uu | ⚠️ **SANS EFFET AUJOURD'HUI** | 0 = line trace pur ; >0 = aide à la visée. **Activé le 2026-08-20** : « c'est trop dur surtout avec la speed accumulée ». Passe 2 de `SPEC_COMBAT §11` — sphere trace **corps uniquement**, ne se déclenche que si la passe 1 rate tout, et **ne donne jamais de headshot**. 25 uu reste sous le rayon d'une capsule ennemie (34). ⚠️ **Cette clé est aujourd'hui presque inopérante en niveau fermé** : la passe 2 exige que la passe 1 ne touche **rien** sur 15 000 uu, or un mur derrière l'ennemi bloque toujours. Mesuré en PIE au J8sept. Encadré « contradiction mesurée » de `SPEC_COMBAT §11` — **décision de Louis attendue avant de retuner cette valeur**. |
 | `Laser_Spread` | 0 | ° | À CALIBRER | **précision parfaite, c'est un laser** |
 | `Laser_RecoilPitch` | 1.2 | ° | À CALIBRER | remonte, retour auto |
 | `Recoil_ReturnInterpSpeed` | 12 | /s | À CALIBRER | vitesse de retour du kick caméra |
@@ -836,6 +836,51 @@ la ligne de debug muzzle → point d'impact est le seul retour visuel du tir.
 >
 > **Dérogation de Tick.** `BP_LaserWeapon` tick **uniquement** pour ce faisceau de debug, et cette
 > dérogation saute au J14 (`SPEC_COMBAT §2`).
+
+### Debug du tir — côté cible (PROVISOIRE — remplacé par le juice d'impact au J14)
+
+Variables `Instance Editable` catégorie `Debug` sur **`BP_TargetDummy`** (`Dev/Sandbox/`, sandbox only).
+Sans ce retour, un tir sur une cible est **totalement muet** tant que `SpawnHitFX` n'existe pas :
+`10_DEFINITION_OF_DONE §1` exige un feedback par action. Une **sphère de debug** est dessinée au
+`DamageInfo.HitLocation` à chaque impact **non létal** ; la mort, elle, se lit au `DestroyActor`.
+
+| Clé | Valeur | Unité | Statut | Note |
+|---|---|---|---|---|
+| `TargetDebug_HitSphereRadius` | 25 | uu | **À CALIBRER** | `BP_TargetDummy.DebugHitSphereRadius`. Rayon de la sphère d'impact. La cible fait 60 × 60 × 180 : au-delà de ~30 la sphère déborde du volume et devient illisible. |
+| `TargetDebug_HitSphereDuration` | 0.25 | s | **À CALIBRER** | `BP_TargetDummy.DebugHitSphereDuration`. ⚠️ **Ne jamais mettre 0** : `Duration <= 0` sur un `Draw Debug *` ne veut pas dire « une frame », le moteur retombe sur `ULineBatchComponent::DefaultLifeTime = 1.0 s` (`12_PIEGES §6.18`). À 5.5 tirs/s (`Laser_FireCooldown` = 0.18), 0.25 s fait coexister ~1.4 sphère : on lit chaque impact sans empiler. |
+| `TargetDebug_HitSphereThickness` | 2.0 | px | **À CALIBRER** | `BP_TargetDummy.DebugHitSphereThickness`. Même épaisseur que `LaserDebug_LineThickness`, pour que la sphère se lise comme la fin du rayon. |
+| `TargetDebug_HitSphereSegments` | 12 | — | **À CALIBRER** | `BP_TargetDummy.DebugHitSphereSegments`. Tessellation du fil de fer. Exposée pour ne laisser **aucune** valeur sur un défaut de pin (R3). |
+| `TargetDebug_HitSphereColor` | `(0.910, 0.200, 0.431, 1.0)` | LinearColor | **À CALIBRER** | `BP_TargetDummy.DebugHitSphereColor`. `OD_Magenta_Player` `#E8336E` — **la couleur du joueur et de tout ce qu'il projette** (`SPEC_COMBAT §3.2`, `PALETTE.md §3`). Valeur **strictement identique** à `LaserDebug_LineColor` : le rayon et son impact doivent être la même teinte. |
+
+> ⚠️ **Ces 5 clés doivent valoir la même chose sur les 7 instances placées dans `L_Sandbox_Movement`,
+> pas seulement sur le CDO.** Une variable ajoutée à une classe qui a déjà des instances dans un niveau
+> naît à **`0`** sur ces instances — soit un rayon nul et une durée de 1 s (le piège ci-dessus).
+> Vérifié en PIE le 2026-08-20. Cf. `12_PIEGES_OUTILLAGE §5.34`.
+
+### Hitbox de tête de la cible de test — `BP_TargetDummy.HeadHitbox` (J8sept)
+
+`SphereCollision` nommée **`HeadHitbox`**, **Component Tag `Head`**, enfant de `TargetMesh`.
+Elle bloque le canal `Weapon` — posé **dans le graphe** au `BeginPlay`
+(`SetCollisionResponseToAllChannels(Ignore)` → `SetCollisionResponseToChannel(ECC_GameTraceChannel3, Block)`
+→ `SetCollisionEnabled(QueryOnly)`), **jamais par un preset de collision** (`12_PIEGES §5.15` et `§5.26`).
+
+⚠️ **Les deux colonnes ne sont pas la même chose.** `TargetMesh` est la racine et porte l'échelle
+`0.6 / 0.6 / 1.8` ; la sphère en hérite. `USphereComponent::GetShapeScale()` renvoie
+`GetMinimumAxisScale()` = **0.6** (source moteur, vérifiée), et la `RelativeLocation` est mise à
+l'échelle par le parent sur **1.8**. La valeur saisie dans le panneau Détails n'est donc **pas** la
+valeur en uu monde. Le viewport, lui, dessine bien la sphère à sa taille **monde** — c'est donc lui
+qui fait foi pour un réglage à l'œil.
+
+| Clé | Valeur MONDE (uu) | Valeur SAISIE sur le composant | Statut | Note |
+|---|---|---|---|---|
+| `TargetHead_Radius` | **50** | `Sphere Radius = 83.333333` (= 50 / 0.6) | **À CALIBRER** | **Doit dépasser la demi-diagonale du corps (42.4 uu pour 60 × 60), pas sa demi-largeur (30).** À 40 uu la tête rentrait dans le cube dès 45° d'incidence et le headshot devenait impossible en approche oblique (`SPEC_COMBAT §5.1`). |
+| `TargetHead_LocalZ` | **+75** au-dessus du pivot (soit `Z = 165` monde, cible posée à `Z = 90`) | `Relative Location Z = 41.666667` (= 75 / 1.8) | **À CALIBRER** | Bande de headshot résultante : `Z` monde ≈ **125 → 180** selon l'angle d'approche (+ 35 uu de débordement au-dessus du crâne). Soit le **haut ~30 %** de la silhouette. |
+
+> ⚠️ **Après tout retuning de `HeadHitbox` dans le Blueprint, il faut RE-POSER les cibles du sandbox.**
+> Une recompilation ré-instancie les acteurs déjà placés et **fige** sur eux les valeurs de composant
+> du moment ; le template ne les rattrape plus jamais. Et `relativeLocation` est **inécrivable** sur un
+> composant d'instance (l'écriture est acceptée et sans effet). Cf. `12_PIEGES_OUTILLAGE §5.35`.
+> Sans conséquence au J12 : `BP_EnemyBase` sera réglé **avant** d'être posé.
 
 ### Échelles de confort (Settings joueur)
 
