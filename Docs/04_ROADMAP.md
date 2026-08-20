@@ -625,12 +625,12 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       (Louis). **Le vrai jugement de `Style_Loss_Heat` appartient au J18**, quand la perte affichée
       devient la perte appliquée. Reporté dans la dette J18 ci-dessous.
 
-> **⚠️ Bug hors J9 à traiter avant le J12** (`12_PIEGES §6.26`) : le `BeginPlay` de `BP_LaserWeapon`
-> ne va pas jusqu'au bout — **`OwnerCharacter` et `OwnerController` sont nuls en jeu**, mesuré sur
-> l'instance PIE. `EnsureOwnerRefs` rattrape le contrôleur à chaque tir, **personne ne rattrape le
-> personnage**. Conséquence encore inerte : `S_DamageInfo.Instigator` est nul sur tous les tirs.
-> Sans effet sur `BP_TargetDummy`, **cassera le crédit de kill et le score** dès `BP_EnemyBase`.
-> Découvert au J9, **non corrigé** (hors périmètre), signalé à Louis.
+> ✅ **Bug hors J9 — RÉSOLU le 2026-08-20** (`12_PIEGES §6.26`, `Docs/Journal/2026-08-20_J9bis_Instigator_ChildActor.md`).
+> Cause racine : `ChildActor_Laser.bSetOwner` valait `false` — **le défaut moteur d'UE 5.8**. Sans lui
+> `UChildActorComponent::CreateChildActor` n'assigne jamais `Params.Owner`, donc `GetOwner()` renvoyait
+> nul et le `Cast To Character` du `BeginPlay` partait en `CastFailed` (pin non connecté, arrêt muet).
+> Correctif : **une case à cocher**, zéro nœud modifié. Prouvé en PIE par A/B sur un tir réel —
+> `S_DamageInfo.Instigator` passe de `None` à `BP_PlayerCharacter_C_0`.
 
 ### J10 — Headshots & feedback
 - [x] Hitboxes de tête, détection, multiplicateur — **fait en avance au J8sept** (`ComponentHasTag("Head")`,

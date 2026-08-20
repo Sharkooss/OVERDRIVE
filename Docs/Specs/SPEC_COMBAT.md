@@ -60,7 +60,7 @@ socket `S_Weapon` de `SK_PlayerArms`). **Tick désactivé** — sauf la dérogat
 | `Muzzle` | Scene | Origine **cosmétique** du beam et du muzzle flash |
 | `BPC_Heat` | Component | Jauge de chaleur. **Vit sur l'arme, pas sur le character** (`05_ARCHITECTURE §2`) |
 | `WeaponData` | `PDA_WeaponData` | Instance Editable, cat. `Combat`, défaut `DA_Weapon_Laser`. **Seule source des valeurs.** |
-| `OwnerCharacter` / `OwnerController` | refs | Cachées au `BeginPlay`, jamais de cast en Tick |
+| `OwnerCharacter` / `OwnerController` | refs | Cachées au `BeginPlay`, jamais de cast en Tick. **Prérequis : cocher `Set Owner` sur `ChildActor_Laser`** — sans ça `GetOwner()` est nul et les deux refs restent nulles (`12_PIEGES §6.26`). `OwnerController` est en plus rafraîchi par `EnsureOwnerRefs` en tête de `TryFire`, pour le respawn |
 | `bCanFire` | Bool | Gate du cooldown |
 | `bUseMuzzleConfirmTrace` | Bool | Défaut `false` (§3.4) |
 | `TryFire()` | Event | Point d'entrée unique depuis `IA_Fire` (§3) |
@@ -360,9 +360,14 @@ continu** au `BPC_StyleMeter`, par le même timer `Heat_TickInterval` qui gère 
 > `EnsureCMC` et `PushToHeatBar` sont les deux résolutions **paresseuses** (voir juste après).
 >
 > **Résolution paresseuse — pourquoi rien n'est câblé au `BeginPlay`.**
-> `BP_LaserWeapon` est un **Child Actor** : à son `BeginPlay`, ni le pawn joueur ni le
-> `PlayerController` ne sont fiables (`12_PIEGES §6.26` — `OwnerCharacter` reste **nul** en jeu).
-> Le J9 ne s'y accroche donc pas : `InitializeHeat` ne fait que **lire le tuning et armer le timer**
+> `BP_LaserWeapon` est un **Child Actor**, et son `BeginPlay` peut passer **avant `Possess()`**
+> lors d'un respawn en cours de partie : le `PlayerController` n'y est donc pas garanti.
+> ⚠️ **Mise à jour 2026-08-20** : la raison invoquée au J9 (« `OwnerCharacter` reste nul en jeu »)
+> **n'était pas la bonne** — c'était `ChildActor_Laser.bSetOwner = false`, le défaut moteur d'UE 5.8
+> (`12_PIEGES §6.26`, corrigé). `OwnerCharacter` est désormais **valide dès le `BeginPlay`**.
+> La conception paresseuse reste néanmoins la bonne et **ne change pas** : elle ne dépend d'aucun
+> cast, donc elle est robuste au respawn comme au démarrage.
+> `InitializeHeat` ne fait que **lire le tuning et armer le timer**
 > (le `WeaponData` est un défaut de classe, toujours valide), et `HeatTickStep` appelle `EnsureCMC`
 > à **chaque tick tant que ce n'est pas résolu** — cette fonction récupère alors
 > `GetPlayerCharacter(0).CharacterMovement`, crée la jauge et pose `bInitialized = true`.
