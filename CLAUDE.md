@@ -111,6 +111,40 @@ le mouvement, le combat ou le feeling :
 
 Un commit prématuré transforme une régression en historique à défaire.
 
+### R11 — Une branche par jour ou par feature. Jamais de travail sur `main`.
+
+`main` ne reçoit que des merges. Tout travail part d'une branche dédiée :
+`feat/jNN-<slug>` pour un jour de roadmap, `fix/<slug>` pour un correctif, `docs/<slug>` pour de la doc seule.
+
+**Et avant d'ouvrir l'éditeur Unreal, tu bascules la copie principale sur cette branche.**
+
+```bash
+cd "L:/Unreal Engine/Projects/OVERDRIVE"   # éditeur FERMÉ
+git switch -c feat/j12-enemy-base
+# puis seulement là, ouvrir OVERDRIVE.uproject
+```
+
+> ⚠️ **Le piège qui rend cette règle non négociable.** L'éditeur tourne sur **une seule** copie de
+> travail — la principale. Un agent qui travaille dans un worktree y écrit ses **docs**, mais ses
+> `.uasset` modifiés par MCP atterrissent dans la **copie principale**, sur la branche qu'elle a
+> checkout. Docs et assets finissent donc sur deux branches différentes, et il faut les recoller à la
+> main. Pire : si `main` est checkout, l'éditeur écrit directement sur `main` en violation de cette
+> règle, **sans que personne ne l'ait décidé**.
+>
+> Corollaire à connaître : **deux sessions d'agent qui tournent en parallèle partagent le même
+> éditeur et la même copie principale.** L'une peut commiter les assets modifiés par l'autre sans le
+> savoir — c'est arrivé le 2026-08-20 (`6aac8e1` a embarqué le correctif `bSetOwner` d'une autre
+> session, en annonçant « aucune modification volontaire »). **Avant tout commit d'un `.uasset` :
+> `git log --oneline -3` et `git status`, pour voir si quelqu'un d'autre est passé.**
+
+Conséquences pratiques :
+- Un `.uasset` n'est **jamais** modifié par deux sessions en même temps — git ne sait pas fusionner
+  du binaire, la résolution est toujours « on en garde un et on jette l'autre ».
+- Quand un `.uasset` diverge quand même, **comparer les octets avant de choisir** : `size` du pointeur
+  LFS puis `cmp -l` sur les objets. Une différence limitée aux ~20 premiers octets est le hash de
+  sauvegarde du package — les deux fichiers ont alors le **même contenu**.
+- R10 s'applique toujours : la branche existe dès le début du travail, mais le commit attend Louis.
+
 ---
 
 ## 4. Environnement technique
