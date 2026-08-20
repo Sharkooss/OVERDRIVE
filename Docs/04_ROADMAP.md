@@ -544,13 +544,51 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       **en attente du playtest de Louis (R8 / R10) — aucun commit**
 
 > Reporté hors J8, volontairement : `ApplyRecoil` (`§3.6`, exige un
-> `BP_PlayerCameraManager` custom → J14), gate heat (J9), gate health (J12),
+> `BP_PlayerCameraManager` custom → J14), chaleur du tir (J9 — ~~gate heat~~ : il n'y a **plus de
+> gate**, cf. `11_ARBITRAGES D58`), gate health (J12),
 > `bUseMuzzleConfirmTrace` (`§3.4`, défaut `false`), decals / VFX d'impact décor (J14).
 
-### J9 — Heat & overheat
-- [ ] `BPC_Heat` : machine à états, décroissance, délai, overheat, sortie
-- [ ] Feedback provisoire (barre debug + son)
-- [ ] **Test** : le rythme tirer/refroidir est lisible sans regarder le HUD
+### J9 — Heat : jauge de discipline de tir
+
+> **Refondu avant d'être commencé — `11_ARBITRAGES D58` (2026-08-20).**
+> **Le verrou de tir de 1,5 s est supprimé.** La chaleur ne bloque plus rien : elle monte sur les
+> **tirs ratés**, se rachète par les **headshots** et par la **vitesse**, et coûte du **style**.
+> Motif : `SPEC_COMBAT §1` — *« le combat est un sous-produit du mouvement, jamais son
+> interruption »*, et ce verrou était la **seule interruption du jeu**.
+
+- [ ] **`PDA_WeaponData` : 4 propriétés à ajouter** (`08_DATA_SCHEMAS §3`) — `HeatPerMissedShot`,
+      `HeatCoolPerHeadshot`, `HeatCoolRateAtSpeed`, `HeatCoolSpeedThreshold`, puis renseigner
+      `DA_Weapon_Laser` et **relire l'asset**. ⛔ **Ne rien supprimer** : les 6 clés `INACTIVE`
+      (`HeatPerShot`, `HeatDecayRate`, `HeatDecayDelay`, `OverheatDuration`,
+      `OverheatExitThreshold`, `OverheatDecayMultiplier`) restent en place, **inertes, lues par
+      personne** (`07_TUNING §11`). 25 → **29** propriétés.
+- [ ] **`BPC_Heat`** : `AddHeat` / `RemoveHeat`, états `E_HeatState` (sémantique `D58`,
+      `08_DATA_SCHEMAS §1`), timer `Heat_TickInterval`. **Ni décroissance passive, ni délai,
+      ni verrou, ni condition de sortie** — tout ça est supprimé (`SPEC_COMBAT §4`).
+- [ ] **Sources et puits** : `+Heat_PerMissedShot` **uniquement** si le tir n'a touché aucun acteur
+      `BPI_Damageable` · `−Heat_CoolPerHeadshot` sur headshot · `−Heat_CoolRateAtSpeed` /s tant que
+      la vitesse horizontale ≥ `Heat_CoolSpeedThreshold`. **Un body shot ne fait rien bouger.**
+- [ ] **`TryFire` : supprimer la gate d'overheat** (`SPEC_COMBAT §3.1`) et déplacer le calcul de
+      chaleur **après** `ProcessHit` — elle dépend désormais du **résultat** du tir.
+- [ ] **`MPC_Global.HeatRatio`** (+ `OverheatActive`) : la couleur de l'arme réagit sans BP
+      supplémentaire (`08_DATA_SCHEMAS §6`).
+- [ ] **`WBP_HeatBar` + affichage provisoire du coût** (`SPEC_UI_HUD §3.3a`) : à partir de
+      `Heat_WarningThreshold`, afficher la **grandeur réelle** — `HEAT 82 · STYLE −0.20/s`.
+      ⛔ **Aucun pourcentage de score inventé.** ⛔ **Ni icône de verrou, ni crosshair barré,
+      ni clic refusé** : plus rien n'est bloqué.
+- [ ] **⏳ DETTE DATÉE AU J18 — câblage réel de `Style_Loss_Heat`.** `BPC_StyleMeter` n'existe qu'au
+      **J18** : au J9, `BPC_Heat.GetCurrentStylePenalty()` **calcule et fait afficher** la perte,
+      mais **personne ne la consomme**. Au J18, brancher le timer de chaleur sur
+      `BPC_StyleMeter` (`SPEC_SCORE_RANK §4.2b`) — la valeur affichée devient la valeur appliquée,
+      **rien n'est à réécrire**.
+      → **Pourquoi l'affichage provisoire existe** : sans lui, le J9 livrerait une jauge qui bouge
+      et **ne coûte rien**, donc **impossible à juger et à calibrer**. C'est exactement le piège
+      `Laser_TraceRadius` du J8 (`12_PIEGES §6.24`) — une valeur de tuning qui ne pilote rien, qu'on
+      croit régler et qui ne change rien : **deux chantiers perdus**. La mécanique doit rester
+      **jugeable dès le J9**.
+- [ ] **Test (R8)** : la jauge dit **« tu arroses »**, jamais **« attends »**. Je n'ai à aucun
+      moment eu à cesser de tirer pour laisser refroidir. Viser la tête devient tentant **pour
+      refroidir**, pas seulement pour les dégâts. Checklist complète : `SPEC_COMBAT §12`.
 
 ### J10 — Headshots & feedback
 - [x] Hitboxes de tête, détection, multiplicateur — **fait en avance au J8sept** (`ComponentHasTag("Head")`,
@@ -615,6 +653,13 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 - [ ] `BPC_ScoreManager` : temps, kills, vitesse, `S_LevelScore`
 - [ ] `BPC_StyleMeter` + `DT_StyleEvents`
 - [ ] Affichage temps réel du style
+- [ ] **⏳ Dette J9 à solder — `Style_Loss_Heat` (`11_ARBITRAGES D58`)** : brancher le timer de
+      `BPC_Heat` sur `BPC_StyleMeter` (`SPEC_SCORE_RANK §4.2b`). La perte est **déjà calculée et
+      affichée** depuis le J9 (`BPC_Heat.GetCurrentStylePenalty()`, `SPEC_UI_HUD §3.3a`) : la valeur
+      affichée **devient** la valeur appliquée, rien n'est à réécrire.
+      ⚠️ **Ce n'est pas un `E_StyleEvent`** : perte **continue**, hors `DT_StyleEvents`, hors
+      dégressivité et hors anti-farm. Vérifier aussi que `Style_Gain_HighSpeedSustain` et
+      `Heat_CoolSpeedThreshold` portent bien **la même valeur de seuil** (`07_TUNING §11`/`§14`).
 
 ### J19 — Rank, résultats & vies
 - [ ] Calcul du rank, `S_RankThresholds`, `PDA_LevelData`

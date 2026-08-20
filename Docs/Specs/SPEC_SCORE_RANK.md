@@ -190,10 +190,50 @@ FUNCTION AddStyleEvent(Event : E_StyleEvent)
 | `BPC_Health.OnDamageTaken` | `TookDamage` | `Style_Loss_TakeDamage` |
 | timer d'immobilité | `Idle` | `Style_Loss_Idle` |
 | `BPC_Health.OnDeath` | `Death` | `Style_Loss_Death` → reset à `Style_Start` |
+| **`BPC_Heat` (timer `Heat_TickInterval`)** | **— aucun `E_StyleEvent`, cf. §4.2b** | **`Style_Loss_Heat`** |
 
 Le contexte d'un kill est résolu **une seule fois**, dans l'ordre de priorité :
 `WallSlamKill > Headshot > MeleeKill > AirKill > SlideKill > Kill`. **Un kill = un seul événement de
 style.** Pas d'empilement, pas de combo à mémoriser : c'est la règle qui garde le système intuitif.
+
+### 4.2b Perte continue liée à la chaleur — `Style_Loss_Heat` (`11_ARBITRAGES D58`)
+
+**La chaleur de l'arme est la seule entrée du Style Meter qui n'est pas un `E_StyleEvent`.** C'est
+délibéré : la chaleur est un **état** qui dure, pas un accident qui arrive.
+
+```
+EVENT HeatTick   (timer de BPC_Heat, cadence Heat_TickInterval — 07_TUNING §11)
+    IF BPC_Heat.CurrentHeat >= Heat_WarningThreshold :
+        CurrentMultiplier = max(Style_Start, CurrentMultiplier + Style_Loss_Heat * DeltaTime)
+        Dispatch OnStyleChanged(...)
+```
+
+| Règle | Détail |
+|---|---|
+| Condition | `CurrentHeat >= Heat_WarningThreshold` (`07_TUNING §11`). En dessous : **aucune perte**. |
+| Nature | Perte **continue**, par seconde, exprimée par `Style_Loss_Heat` (`07_TUNING §14`). Elle **n'appelle pas `AddStyleEvent`**. |
+| Anti-farm | **Hors périmètre** de `IsEventAllowed` / `GetDiminishFactor` (§4.4) : une pénalité ne se farme pas, et la dégressivité l'affaiblirait à mesure qu'elle dure — exactement l'inverse de l'intention. |
+| Cumul | Se **cumule** avec `Style_DecayPerSec` (§4.3). Un joueur chaud **et** inactif paie les deux. |
+| Plancher | `Style_Start`, comme toute perte. Jamais en dessous. |
+| Canal de score | **Aucun.** La chaleur n'a **pas** de ligne dédiée dans le score : elle passe entièrement par le style (`11_ARBITRAGES D58`, options écartées). L'écran de résultats reste à **4 composantes** (§2). |
+
+**Comment le joueur éteint cette perte** — les deux puits de `SPEC_COMBAT §4.1` : un **headshot**
+(retrait fixe, `Heat_CoolPerHeadshot`) ou **rouler au-dessus de `Heat_CoolSpeedThreshold`**
+(retrait continu, `Heat_CoolRateAtSpeed`). Il n'y a **aucune décroissance passive** : attendre ne
+refroidit rien.
+
+> ⚠️ **`Heat_CoolSpeedThreshold` est la même valeur que le seuil de `Style_Gain_HighSpeedSustain`,
+> volontairement** (`07_TUNING §11`/`§14`). Au-dessus de ce seuil, le joueur **gagne du style et
+> refroidit son arme en même temps** : une seule règle, deux récompenses. C'est la clé de voûte du
+> design de D58 — **les deux valeurs se déplacent ensemble, jamais l'une sans l'autre.**
+
+> ### ⏳ Dette datée au J18
+>
+> `BPC_StyleMeter` **n'existe qu'au J18**, `BPC_Heat` arrive au **J9**. Entre les deux, `BPC_Heat`
+> calcule la perte (`GetCurrentStylePenalty()`) et la **fait afficher** telle quelle par le HUD
+> (`SPEC_UI_HUD §3.3`) **sans que personne ne la consomme**. Le câblage réel vers
+> `BPC_StyleMeter` est à faire au J18 (`04_ROADMAP`) — l'affichage provisoire existe pour que la
+> mécanique reste **jugeable** dès le J9 (parade au piège `12_PIEGES §6.24`).
 
 ### 4.3 Décroissance
 
@@ -205,7 +245,8 @@ EVENT StyleTick (timer, cadence = Score_StyleTickRate, §14)
         CurrentMultiplier = max(Style_Start, CurrentMultiplier - Style_DecayPerSec * DeltaTime)
         Dispatch OnStyleChanged(...)
 ```
-- Plancher : `Style_Start` (jamais en dessous de x1.00, jamais négatif).
+- Plancher : `Style_Start` (jamais en dessous de x1.00, jamais négatif). Vaut aussi pour
+  `Style_Loss_Heat` (§4.2b), qui **se cumule** avec cette décroissance sans jamais franchir le plancher.
 - Plafond : `Style_Max`. Au plafond, `OnStyleMaxed` déclenche un feedback HUD dédié et les gains
   supplémentaires sont **silencieusement absorbés** (pas de banque de style en réserve).
 - Reset complet à `Style_Start` : mort du joueur, et chargement d'un nouveau niveau.
@@ -600,6 +641,15 @@ WBP_Results  ── OnContinueClicked ──▶  BP_LootChest.Roll(S_LevelScore.
 - [ ] Alterner kill / wall ride / dash : le multiplicateur monte **plus vite** que la répétition.
 - [ ] Se faire toucher au style max : chute nette et lisible à l'écran.
 - [ ] Mourir : le style revient à `Style_Start`, pas à autre chose.
+- [ ] **Chaleur (§4.2b)** — vider des tirs dans un mur jusqu'à dépasser `Heat_WarningThreshold` :
+      le style se met à **fuir en continu**, et le HUD affiche le coût exact. *(Au J9 la perte est
+      **affichée mais pas appliquée** : le câblage arrive au J18 — vérifier alors que le
+      multiplicateur baisse vraiment.)*
+- [ ] **Chaleur** — reprendre de la vitesse au-dessus de `Heat_CoolSpeedThreshold` : la fuite
+      s'arrête **et** `Style_Gain_HighSpeedSustain` se met à créditer. **Les deux au même seuil.**
+- [ ] **Chaleur** — un headshot fait redescendre la chaleur assez pour couper la perte.
+- [ ] **Chaleur** — chaud **et** immobile : les deux pertes se cumulent, sans jamais passer sous
+      `Style_Start`.
 
 **Rank & résultats**
 - [ ] Run propre = **A**. Si c'est S du premier coup, `ParScore` est mal calibré.
@@ -631,11 +681,14 @@ WBP_Results  ── OnContinueClicked ──▶  BP_LootChest.Roll(S_LevelScore.
 ## 11. Où vivent les valeurs
 
 Toutes les clés citées dans ce document (`Score_DeathPenalty`, `Score_SpeedSampleRate`, `Score_StyleTickRate`,
-`Kill_HeadshotBonus`, `Kill_WallSlamBonus`, `Style_*`, `Results_StepDelay`, `Results_TieTolerance`…)
-sont définies dans **`Docs/07_TUNING.md §14`**. Les clés de **run et de vies** (`Run_MaxLives`,
+`Kill_HeadshotBonus`, `Kill_WallSlamBonus`, `Style_*` — **`Style_Loss_Heat` compris** —,
+`Results_StepDelay`, `Results_TieTolerance`…) sont définies dans **`Docs/07_TUNING.md §14`**.
+Les clés de **chaleur** citées en §4.2b (`Heat_WarningThreshold`, `Heat_CoolSpeedThreshold`,
+`Heat_CoolPerHeadshot`, `Heat_CoolRateAtSpeed`, `Heat_TickInterval`) sont dans **`§11`**.
+Les clés de **run et de vies** (`Run_MaxLives`,
 `Run_LevelCount`, `Run_LivesRefillOnBoss`, `RunFailed_ScreenDuration`) sont dans **`§18`**.
 Aucune n'est orpheline, aucune n'est à créer.
 
 > Règle R3 : la valeur vit dans `07_TUNING.md`, jamais dans une spec. On y renvoie par nom de clé.
-> Décisions d'arbitrage applicables à ce système : **`Docs/11_ARBITRAGES.md` D1, D13, D14, D16, D18, D31**.
+> Décisions d'arbitrage applicables à ce système : **`Docs/11_ARBITRAGES.md` D1, D13, D14, D16, D18, D31, D58**.
 > Couleurs (rangs, panneaux) : **`Docs/ArtDirection/PALETTE.md §6 et §7`**, sans exception.

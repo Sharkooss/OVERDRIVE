@@ -16,6 +16,17 @@
 ### `E_HeatState`
 `Cooling` · `Building` · `Warning` · `Overheated`
 
+> **L'enum est INCHANGÉ. Seule sa sémantique change** (`11_ARBITRAGES D58`, 2026-08-20).
+> Il a été saisi **à la main par Louis** et aucun outil du projet ne sait créer ou modifier un enum
+> (`12_PIEGES §5.2`) : **on n'y touche pas**, on redéfinit ce que ses valeurs veulent dire.
+
+| Valeur | Sémantique (depuis `D58`) |
+|---|---|
+| `Cooling` | la chaleur **descend** — headshot encaissé, ou vitesse ≥ `Heat_CoolSpeedThreshold` |
+| `Building` | la chaleur **monte** — un tir **raté** vient de partir |
+| `Warning` | `CurrentHeat >= Heat_WarningThreshold` — **`Style_Loss_Heat` s'applique** |
+| `Overheated` | `CurrentHeat >= Heat_Max` — **pénalité de style au MAXIMUM.** ⚠️ Ce n'est **plus** « tir bloqué » : plus rien n'est bloqué par la chaleur, jamais (`SPEC_COMBAT §4`) |
+
 ### `E_Rank`
 `D` · `C` · `B` · `A` · `S`
 *(ordre croissant volontaire : `D=0` … `S=4`, pour comparer avec `>=`)*
@@ -215,13 +226,39 @@ Instance : `DA_Weapon_Laser`. Valeurs : `Docs/07_TUNING.md §11`.
 |---|---|
 | `BodyDamage` / `HeadshotDamage` / `HeadshotMultiplier` | Float |
 | `Range` / `FireCooldown` / `TraceRadius` / `RecoilPitch` | Float |
-| `HeatMax` / `HeatPerShot` / `HeatDecayRate` / `HeatDecayDelay` | Float |
-| `OverheatDuration` / `OverheatExitThreshold` / `OverheatDecayMultiplier` | Float |
-| `HeatWarningThreshold` / `HeatTickInterval` | Float |
+| `HeatMax` / `HeatWarningThreshold` / `HeatTickInterval` | Float |
+| **`HeatPerMissedShot`** | Float — **À AJOUTER au J9** (`D58`) |
+| **`HeatCoolPerHeadshot`** | Float — **À AJOUTER au J9** (`D58`) |
+| **`HeatCoolRateAtSpeed`** | Float — **À AJOUTER au J9** (`D58`) |
+| **`HeatCoolSpeedThreshold`** | Float — **À AJOUTER au J9** (`D58`) |
+| ⛔ `HeatPerShot` / `HeatDecayRate` / `HeatDecayDelay` | Float — **INACTIVES** (`D58`), conservées, lues par personne |
+| ⛔ `OverheatDuration` / `OverheatExitThreshold` / `OverheatDecayMultiplier` | Float — **INACTIVES** (`D58`), conservées, lues par personne |
 | `RecoilReturnInterpSpeed` | Float |
 | ~~`TraceChannel`~~ | **retiré au J8** — voir ci-dessous |
 | `MuzzleVFX` / `BeamVFX` / `ImpactVFX` / `HeadshotImpactVFX` | `NiagaraSystem` (ref **dure**) |
-| `FireSFX` / `ImpactSFX` / `HeadshotSFX` / `DenySFX` | `SoundBase` (ref **dure**) |
+| `FireSFX` / `ImpactSFX` / `HeadshotSFX` / ⛔ `DenySFX` | `SoundBase` (ref **dure**). `DenySFX` est **sans objet** depuis `D58` : aucun tir n'est refusé. Champ conservé, non lu |
+
+> ### 🔥 Refonte de la chaleur — `11_ARBITRAGES D58` (2026-08-20)
+>
+> **L'asset n'est PAS encore modifié. C'est du travail de J9.**
+>
+> **À ajouter au J9** — 4 propriétés `Instance Editable`, catégorie `Combat`, valeurs dans
+> `07_TUNING §11` : `HeatPerMissedShot` · `HeatCoolPerHeadshot` · `HeatCoolRateAtSpeed` ·
+> `HeatCoolSpeedThreshold`. Après création, **renseigner `DA_Weapon_Laser`** et **relire l'asset**
+> (règle 1 de `12_PIEGES` : un outil qui n'a pas erré n'a pas forcément écrit).
+>
+> **À NE PAS supprimer** — les 6 propriétés marquées ⛔ ci-dessus (`HeatPerShot`, `HeatDecayRate`,
+> `HeatDecayDelay`, `OverheatDuration`, `OverheatExitThreshold`, `OverheatDecayMultiplier`)
+> **restent en place et restent renseignées dans `DA_Weapon_Laser`**. Elles deviennent **inertes** :
+> **aucun Blueprint ne doit les lire**. Même convention que `Dash_GravityScale` (`D31`) et les
+> `BHop_*` (`D52`) — une clé morte effacée revient un jour sous un autre nom.
+> ⚠️ Corollaire de revue : au J9, un `BPC_Heat` qui lit `WeaponData.HeatDecayRate` **compile sans
+> le moindre warning**. C'est le mode d'échec à surveiller.
+>
+> **`HeatMax` et `HeatWarningThreshold` sont conservées et actives**, `HeatTickInterval` aussi —
+> c'est le timer de chaleur qui applique `HeatCoolRateAtSpeed` **et** `Style_Loss_Heat`.
+>
+> **Compte de propriétés** : 25 au J8 → **29 attendues** après le J9 (aucune suppression).
 
 > **État réel au J8 : 25 propriétés `Instance Editable`**, créées par outil et relues une par une.
 > Trois écarts assumés par rapport à la liste d'origine, tous documentés ici :

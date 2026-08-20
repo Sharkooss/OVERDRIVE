@@ -236,6 +236,105 @@ Mettre à jour `05_ARCHITECTURE §2`.
 
 ---
 
+> ### ℹ️ Numérotation — où sont D34 à D57
+>
+> **D34 à D57 ont été attribués pendant les J4→J8**, au fil des playtests, mais **rédigés dans
+> `04_ROADMAP.md` et `07_TUNING.md`, jamais back-portés ici.** Ce fichier saute donc de D33 à D58.
+> Ce n'est pas un trou de numérotation libre : **ces numéros sont pris.** Avant d'en poser un
+> nouveau, `grep -rn "D5[0-9]" Docs/` — pas seulement une lecture de ce fichier.
+> *(Écart de documentation constaté le 2026-08-20 en posant D58. Le back-port n'est pas fait :
+> il n'entrait pas dans le périmètre de la décision du jour.)*
+
+---
+
+## D58 — La chaleur ne bloque plus rien : jauge de discipline de tir, payée en style
+
+*Tranché par Louis le **2026-08-20**, avant l'implémentation du J9. Le modèle à verrou n'a jamais
+été construit — c'est un arbitrage de spec, pas un correctif de playtest.*
+
+**Problème** : le modèle spec'é faisait de l'overheat un **verrou de tir** de `Heat_OverheatDuration`
+(1,5 s, `07_TUNING §11`). Or `SPEC_COMBAT §1` — la philosophie du combat, et par extension le pilier
+n°1 du jeu — pose que *« le combat est un sous-produit du mouvement, **jamais son interruption** »*.
+Ce verrou était **la seule interruption du jeu** : à 3000 uu/s, 1,5 s d'arme muette est une éternité,
+et la seule réponse rationnelle du joueur est de **s'arrêter de tirer en avance**, c'est-à-dire de
+faire de la comptabilité de munitions — précisément l'interdit de `SPEC_COMBAT §1`
+(« Munitions = rythme, pas gestion »).
+
+**Décision** : la chaleur devient une **jauge de discipline de tir**. Elle **ne bloque rien**,
+elle **nourrit le Style Meter** — dans le mauvais sens.
+
+| Axe | Règle | Clé (`07_TUNING §11`) |
+|---|---|---|
+| **Montée** | **uniquement les tirs ratés** — un tir dont le trace ne touche aucun acteur `BPI_Damageable`. Un tir qui touche ne chauffe **pas du tout** | `Heat_PerMissedShot` |
+| **Puits n°1** | montant **fixe** retiré à chaque **headshot** | `Heat_CoolPerHeadshot` |
+| **Puits n°2** | refroidissement **continu** au-dessus d'un seuil de vitesse | `Heat_CoolRateAtSpeed` / `Heat_CoolSpeedThreshold` |
+| **Décroissance passive** | **aucune.** Le refroidissement se **mérite** | — |
+| **Conséquence** | **perte de style continue** tant que `CurrentHeat >= Heat_WarningThreshold` | `Style_Loss_Heat` (`§14`) |
+| **Blocage** | **aucun, jamais.** Ni tir, ni melee, ni mouvement | — |
+
+Ce que ça dit au joueur, en une phrase : **« rate, et ton style fond ; touche et va vite, et tu ne
+verras jamais cette jauge. »**
+
+**Le seuil partagé est un choix de design, pas une coïncidence.** `Heat_CoolSpeedThreshold` est
+**volontairement la même valeur** que le seuil de `Style_Gain_HighSpeedSustain` (`07_TUNING §14`) :
+le joueur n'a **qu'une** règle à retenir — *au-dessus de ce seuil, je gagne du style **et** mon arme
+refroidit*. Deux seuils voisins mais distincts auraient produit deux règles à mémoriser pour un gain
+de tuning nul. **Les deux valeurs se déplacent ensemble.**
+
+**Options écartées** :
+
+| Option | Pourquoi elle est écartée |
+|---|---|
+| **Garder le verrou de tir** | Contredit frontalement `SPEC_COMBAT §1`. Seule interruption du jeu. Un joueur qui apprend à ne pas overheat apprend à **moins tirer**, pas à mieux jouer |
+| **Canal de score séparé** (une pénalité de score dédiée à la chaleur, hors style) | Ferait vivre **deux multiplicateurs distincts alimentés par les mêmes entrées** — précision et vitesse nourrissent déjà le style. Le joueur aurait deux jauges à arbitrer là où `SPEC_SCORE_RANK §1` exige *« 4 composantes, pas 9 »*, et l'écran de résultats (`§7.3`) désignerait un coupable dans une 5ᵉ colonne qui n'existe pas |
+| **Conséquence immédiate de gameplay** (cadence ralentie, dégâts réduits, dispersion au-delà du seuil) | **Écartée par Louis.** C'est une interruption déguisée : elle punit encore le joueur *pendant* l'action au lieu de *sur le bilan*. On **attend le J18** et le Style Meter réel plutôt que d'inventer une punition intermédiaire qu'il faudrait défaire |
+| **Supprimer la chaleur entièrement** | Non retenu : la jauge reste le seul retour qui dit *« tu arroses »*, et elle pilote déjà `MPC_Global.HeatRatio` (couleur de l'arme). Le problème était le **verrou**, pas la **mesure** |
+
+**Séquençage — et c'est le point dur.** `BPC_StyleMeter` n'existe qu'au **J18**. Livrer au J9 une
+jauge dont l'unique effet arriverait 9 jours plus tard reproduirait exactement le piège
+`Laser_TraceRadius` (`04_ROADMAP` J8, `12_PIEGES §6.24`) : **une valeur de tuning qui ne pilote
+rien, qu'on croit calibrer et qui ne change rien** — deux chantiers perdus.
+
+Le **J9 livre donc** : la jauge, ses sources, ses puits, `MPC_Global.HeatRatio` (couleur de l'arme,
+déjà prévu), **et un affichage provisoire du coût à l'écran** montrant **exactement** la perte qui
+s'appliquera au J18 — de la forme `HEAT 82 · STYLE −0.20/s`. **Pas de pourcentage de score
+inventé** : on affiche la **grandeur réelle**, jamais une approximation qu'il faudrait défaire.
+Le vrai câblage de `Style_Loss_Heat` vers `BPC_StyleMeter` est une **dette datée au J18**,
+écrite comme telle dans `04_ROADMAP`.
+
+**`E_HeatState` est conservé tel quel** — l'enum a été saisi **à la main par Louis**, et aucun outil
+ne sait créer ou modifier un enum sur ce projet (`12_PIEGES §5.2`). Seule la **sémantique** change :
+
+| Valeur | Sémantique D58 |
+|---|---|
+| `Cooling` | la chaleur **descend** (headshot encaissé, ou vitesse au-dessus de `Heat_CoolSpeedThreshold`) |
+| `Building` | la chaleur **monte** (tir raté) |
+| `Warning` | `CurrentHeat >= Heat_WarningThreshold` — **`Style_Loss_Heat` s'applique** |
+| `Overheated` | `CurrentHeat >= Heat_Max` — **pénalité de style active au maximum.** Ce n'est **plus** « tir bloqué » |
+
+**Clés devenues `INACTIVE`** (marquées, **jamais supprimées** — convention `Dash_GravityScale` D31,
+`BHop_*` D52) : `Heat_PerShot` (remplacée par `Heat_PerMissedShot`), `Heat_DecayRate`,
+`Heat_DecayDelay`, `Heat_OverheatDuration`, `Heat_OverheatExitThreshold`,
+`Heat_OverheatDecayMultiplier`.
+⚠️ **Ces six clés existent comme propriétés de `PDA_WeaponData` et sont renseignées dans
+`DA_Weapon_Laser`. Elles y restent, inertes. Aucun Blueprint ne doit les lire.** Ne pas les
+supprimer de l'asset : une clé morte effacée revient un jour sous un autre nom.
+
+**R2 est respectée** (`CLAUDE.md`, `03_SCOPE_LOCK`) : cette décision **modifie deux systèmes déjà
+planifiés** — la chaleur (J9) et le score/style (J18) — et **n'en ajoute aucun**. Aucune arme,
+aucun ennemi, aucun menu, aucune jauge supplémentaire. Le nombre de widgets de HUD est inchangé
+(`WBP_HeatBar` existait déjà), le nombre de composants aussi (`BPC_Heat`, `BPC_StyleMeter`).
+
+**Conséquence** : `SPEC_COMBAT §3.1 / §4 / §10 / §12`, `SPEC_SCORE_RANK §4`, `SPEC_UI_HUD §3.3`,
+`08_DATA_SCHEMAS §1 et §3`, `07_TUNING §11 et §14` et `04_ROADMAP J9` sont alignés sur ce modèle.
+`DA_Weapon_Laser` gagne 4 champs au J9 (`HeatPerMissedShot`, `HeatCoolPerHeadshot`,
+`HeatCoolRateAtSpeed`, `HeatCoolSpeedThreshold`) et n'en perd aucun.
+**Reste ouvert, signalé et non tranché** : `S_Overheat_Deny` (`SPEC_AUDIO §2`) est le son du clic
+refusé pendant un tir bloqué — il n'a plus d'objet, mais son sort relève de `SPEC_AUDIO`, pas de
+cette décision.
+
+---
+
 ## Journal des arbitrages
 
 | Date | # | Décision | Raison |
@@ -244,3 +343,5 @@ Mettre à jour `05_ARCHITECTURE §2`.
 | 2026-08-18 | D26–D30 | Complément | Conflits résiduels remontés pendant la propagation |
 | 2026-08-18 | **D1, D2, D3 révisés** | **Changement de DA** (`KEYART_REF_02.png`) : ville blanche en plein jour au lieu du néon nocturne → rendu éclairé, palette refondue. Et arbitrage de Louis sur les vies |
 | 2026-08-18 | D31–D33 | Ajouts | Conséquences du changement de DA et du système de vies |
+| 2026-08-19 → 20 | D34–D57 | **Rédigés dans `04_ROADMAP.md` / `07_TUNING.md`, pas ici** | Décisions de playtest J4→J8 (dash, wall ride, bunny hop, slide × visée). Numéros **pris** — cf. l'encart de numérotation ci-dessus |
+| 2026-08-20 | **D58** | **Le verrou d'overheat est supprimé** : la chaleur devient une jauge de discipline de tir qui ne bloque rien et coûte du style | `SPEC_COMBAT §1` — *le combat ne doit jamais interrompre le mouvement*, et le verrou en était la seule interruption |

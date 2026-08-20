@@ -76,7 +76,7 @@ socket `S_Weapon` de `SK_PlayerArms`). **Tick désactivé** — sauf la dérogat
 | `UpdateBeam(DeltaSeconds)` | Function | **PROVISOIRE J8bis→J14.** Seul contenu de l'`EventTick`. Si `BeamTimeRemaining > 0` : (1) `BeamStart = select(Elapsed < LaserDebug_AttachTime, Muzzle.GetWorldLocation(), BeamStart)` — accroche puis **décrochage** ; (2) dessine le **halo** (`thickness × GlowWidthMult`, `alpha × GlowAlphaMult`) ; (3) dessine le **cœur** (`thickness`, `alpha`) ; (4) **puis** décrémente. `alpha = sqrt(BeamTimeRemaining / LaserDebug_BeamDuration)` — **fondu en racine carrée, pas linéaire**. Durée de dessin = `LaserDebug_DrawLifetime`. **Les deux traits lisent la même `BeamStart` et la même `BeamEnd`** : deux origines différentes recréeraient la duplication. L'ordre compte : décrémenter avant de dessiner ferait démarrer le faisceau déjà entamé (`12_PIEGES §2.3b`). |
 | `OnShotFired(Hit, bHit)` | Dispatcher | → `BP_PlayerCharacter` → `WBP_HUD`, `BPC_StyleMeter` |
 | `OnHitConfirmed(Target, bHeadshot, bKilled)` | Dispatcher | → hitmarker, `BPC_StyleMeter`, `BPC_HitStop` |
-| `OnOverheatStarted` / `OnOverheatEnded` | Dispatchers | Relayés depuis `BPC_Heat` |
+| `OnOverheatStarted` / `OnOverheatEnded` | Dispatchers | Relayés depuis `BPC_Heat`. **Marquent l'entrée/sortie du maximum de pénalité de style, pas un verrou de tir** (`11_ARBITRAGES D58`, §4) |
 
 > **`SPEC_COMBAT` fait foi sur les dispatchers de l'arme.** Les noms et signatures retenus sont
 > `OnShotFired(Hit, bHit)` et `OnHitConfirmed(Target, bHeadshot, bKilled)` : toute autre doc qui les
@@ -84,7 +84,10 @@ socket `S_Weapon` de `SK_PlayerArms`). **Tick désactivé** — sauf la dérogat
 
 **Répartition** — `BP_PlayerCharacter` possède l'arme et relaie inputs + dispatchers, **aucune** logique de
 trace / dégâts / chaleur. `BP_LaserWeapon` : trace, dégâts, FX, recoil, cooldown. `BPC_Heat` : jauge, états,
-`MPC_Global`. `BPC_Melee` est sur le **character**, pas sur l'arme (le melee reste dispo en overheat).
+`MPC_Global`. `BPC_Melee` est sur le **character**, pas sur l'arme : le melee est une action du corps, pas de
+l'arme, et il doit survivre à un changement ou à une perte d'arme.
+*(Sa justification d'origine — « le melee reste dispo en overheat » — est caduque depuis `D58` : plus rien
+n'est bloqué par la chaleur. Le placement, lui, ne change pas.)*
 
 ## 3. Le tir — séquence complète
 `IA_Fire` (Digital Bool, trigger **`Pressed`** seul, `IMC_Gameplay`) → `BP_PlayerCharacter.HandleFireInput()`
@@ -93,21 +96,37 @@ trace / dégâts / chaleur. `BP_LaserWeapon` : trace, dégâts, FX, recoil, cool
 ### 3.1 `TryFire()`
 ```
 TryFire():
-    if (BPC_Heat.CurrentState == Overheated): PlayDenyFeedback(); return   // gate 1, §4
-    if (!bCanFire): return                                                 // gate 2, silencieux
-    if (OwnerCharacter.BPC_Health.bIsDead): return                         // gate 3
+    if (!bCanFire): return                                      // gate 1, silencieux
+    if (OwnerCharacter.BPC_Health.bIsDead): return              // gate 2
     bCanFire = false
     SetTimerByEvent(EndFireCooldown, WeaponData.FireCooldown)   // 07_TUNING §11 Laser_FireCooldown
     ShotResult = ResolveShot()                                  // §3.2-3.4 + §11
+    bHitTarget = false ; bHeadshot = false
     if (ShotResult.bBlockingHit):
-        ProcessHit(ShotResult.Hit, IsHeadshot(ShotResult.Hit))  // §3.5 — headshot PLEIN, aucune condition
-    PlayFireFX(ShotResult.ImpactPoint, ShotResult.Hit)          // toujours, même à vide
+        bHitTarget = ShotResult.Hit.Actor implements BPI_Damageable   // cible, PAS un mur
+        bHeadshot  = IsHeadshot(ShotResult.Hit)
+        ProcessHit(ShotResult.Hit, bHeadshot)                   // §3.5 — headshot PLEIN, aucune condition
+    PlayFireFX(ShotResult.Hit, ShotResult.bBlockingHit)         // toujours, même à vide
     ApplyRecoil()                                               // §3.6
-    BPC_Heat.AddHeat(WeaponData.HeatPerShot)                    // 07_TUNING §11 — TOUJOURS en dernier
+    // ── Chaleur : TOUJOURS en dernier, et selon que le tir a TOUCHÉ ou non (§4)
+    if      (!bHitTarget): BPC_Heat.AddHeat(WeaponData.HeatPerMissedShot)
+    else if (bHeadshot)  : BPC_Heat.RemoveHeat(WeaponData.HeatCoolPerHeadshot)
+    // un body shot ne fait NI monter NI descendre la chaleur — c'est voulu (§4)
     OnShotFired.Broadcast(ShotResult.Hit, ShotResult.bBlockingHit)
 ```
-> **Ordre imposé** : la chaleur s'ajoute **après** la résolution, sinon le tir qui déclenche l'overheat serait
-> annulé par sa propre chaleur.
+> **Il n'y a plus de gate de chaleur** (`11_ARBITRAGES D58`) : la chaleur ne bloque **jamais** le tir.
+> L'ancienne gate 1 « `if Overheated: PlayDenyFeedback(); return` » **a disparu**, et avec elle le
+> `PlayDenyFeedback` du chemin de tir. Les deux gates restantes sont le cooldown et la mort.
+>
+> **Ordre imposé, et il a changé de raison** : la chaleur se règle **après** la résolution du tir
+> parce qu'elle **dépend de son résultat** — un tir qui touche une cible ne chauffe pas, un headshot
+> refroidit, un tir dans le vide ou dans un mur chauffe. Elle ne peut donc pas être calculée avant
+> `ResolveShot()`.
+>
+> **Un seul test d'interface par tir.** `bHitTarget` et la première ligne de `ProcessHit` (§3.5)
+> posent la **même** question. À l'implémentation (J9), le résultat se calcule une fois et se
+> réutilise : deux `Does Implement Interface` sur le même acteur dans la même frame est du gaspillage
+> et, surtout, deux endroits où la règle peut diverger.
 
 ### 3.2 Origine du trace — la règle
 | | Origine | Direction | Longueur |
@@ -213,51 +232,149 @@ ProcessHit(Hit, bHeadshot):
 dérive l'aim force à compenser donc à ralentir. Le kick est du juice, pas une taxe. **Jamais
 `AddControllerPitchInput`** (§13.13).
 
-## 4. Système de Heat — `BPC_Heat`
+## 4. Système de Heat — `BPC_Heat` : une **jauge de discipline de tir**
+
+> **Réécrit le 2026-08-20 — `11_ARBITRAGES D58`. La chaleur ne bloque plus jamais le tir.**
+> Note historique en fin de section.
+
 Attaché à `BP_LaserWeapon`, lit le `WeaponData` de son owner. Valeurs : `07_TUNING §11 > Heat`.
-États `E_HeatState` (`08_DATA_SCHEMAS §1`) :
+
+**Ce que la jauge mesure** : la **discipline de tir**, pas une réserve de munitions. Elle monte quand le
+joueur **rate**, elle descend quand il **touche précisément** ou quand il **va vite**. Elle n'a qu'une
+conséquence — une **perte de style continue** (`Style_Loss_Heat`, `07_TUNING §14`). Elle ne bloque ni le
+tir, ni le melee, ni le mouvement : **rien, jamais**.
+
+La phrase que le joueur doit pouvoir formuler : *« rate, et mon style fond ; touche et va vite, et je ne
+vois jamais cette jauge. »*
+
+### 4.1 Sources et puits
+
+| Sens | Événement | Montant (`07_TUNING §11`) |
+|---|---|---|
+| **↑ Monte** | **tir raté** — le trace ne touche **aucun** acteur implémentant `BPI_Damageable` (mur, décor, ou rien) | `+ Heat_PerMissedShot` |
+| **= Neutre** | **tir au corps qui touche une cible** | **rien.** Ni montée, ni descente |
+| **↓ Descend** | **headshot** — montant **fixe**, événementiel | `− Heat_CoolPerHeadshot` |
+| **↓ Descend** | **vitesse horizontale ≥ `Heat_CoolSpeedThreshold`** — continu, par le timer | `− Heat_CoolRateAtSpeed` /s |
+| **⛔ Jamais** | **décroissance passive** | **il n'y en a aucune.** Le refroidissement se **mérite** |
+
+**Le seuil de vitesse est partagé avec le style, exprès.** `Heat_CoolSpeedThreshold` est
+**volontairement la même valeur** que le seuil de `Style_Gain_HighSpeedSustain` (`07_TUNING §14`) :
+le joueur n'a **qu'une** règle à apprendre — *au-dessus de ce seuil je gagne du style **et** mon arme
+refroidit*. **Les deux valeurs se déplacent ensemble** ; en changer une seule casse l'intention de D58.
+
+### 4.2 États `E_HeatState` (`08_DATA_SCHEMAS §1`)
+
+**L'enum est inchangé** — il a été saisi à la main et n'est pas modifiable par outil
+(`12_PIEGES §5.2`). **Seule la sémantique d'`Overheated` change.**
+
 ```
-                  AddHeat()                   Heat >= Heat_WarningThreshold
-   ┌──────────┐ ────────────▶ ┌──────────┐ ────────────────────────────────▶ ┌──────────┐
-   │ Cooling  │               │ Building │                                   │ Warning  │
-   │ decay ON │ ◀──────────── │          │ ◀──────────────────────────────── │          │
-   └──────────┘  Heat < Warn  └──────────┘            Heat < Warn            └──────────┘
-        │         & decay actif     ▲                                             │ AddHeat()
-        │ Heat == 0 → prêt          │ OverheatDuration ÉCOULÉ                     │ → Heat >= Heat_Max
-        ▼  (pas un état)            │ ET Heat <= Heat_OverheatExitThreshold        ▼
-   ┌────────────┐         ┌─────────┴───────────────────────────────────────────────┐
-   │  Heat = 0  │         │                      Overheated                          │
-   └────────────┘         │ TIR BLOQUÉ · decay × Heat_OverheatDecayMultiplier        │
-                          │ verrou dur minimum : Heat_OverheatDuration               │
-                          └─────────────────────────────────────────────────────────┘
+       tir RATÉ  (+Heat_PerMissedShot)                Heat >= Heat_WarningThreshold
+   ┌──────────┐ ─────────────────────▶ ┌──────────┐ ──────────────────────────────▶ ┌──────────────┐
+   │ Cooling  │                        │ Building │                                 │   Warning    │
+   │ Heat ↓   │ ◀───────────────────── │  Heat ↑  │ ◀────────────────────────────── │ Style_Loss_  │
+   └──────────┘   headshot, ou vitesse └──────────┘   Heat < Heat_WarningThreshold   │ Heat ACTIVE  │
+        │         ≥ CoolSpeedThreshold                                               └──────────────┘
+        │ Heat == 0                                                                        │ tir raté
+        ▼  (pas un état : juste le plancher)                                               ▼ → Heat >= Heat_Max
+   ┌────────────┐              ┌──────────────────────────────────────────────────────────────┐
+   │  Heat = 0  │              │                        Overheated                            │
+   │ jauge vide │              │  LE TIR N'EST PAS BLOQUÉ.  Heat == Heat_Max (clampé).         │
+   └────────────┘              │  Pénalité de style au MAXIMUM. Sortie : dès que la chaleur    │
+                               │  redescend — headshot ou vitesse. Aucune durée minimale.      │
+                               └──────────────────────────────────────────────────────────────┘
 ```
+
 | Règle | Détail |
 |---|---|
-| Ajout | `AddHeat(Amount)` → `Clamp(CurrentHeat + Amount, 0, Heat_Max)`. Ré-arme le délai de décroissance. |
-| Délai | `Heat_DecayDelay` après **le dernier tir**. Tout tir le ré-arme. |
-| Décroissance | `Heat_DecayRate` /s via un timer à fréquence fixe (`Heat_TickInterval`, `07_TUNING §11`). **Jamais en Tick.** |
-| Décroissance en overheat | `× Heat_OverheatDecayMultiplier`, et **sans attendre** `Heat_DecayDelay`. |
-| Entrée en overheat | `CurrentHeat >= Heat_Max` après un tir. Le tir déclencheur **part quand même**. |
-| Sortie | Conditions **cumulatives** : `Heat_OverheatDuration` écoulé **ET** `CurrentHeat <= Heat_OverheatExitThreshold`. |
-| Bloqué pendant l'overheat | **Uniquement `TryFire()`.** Melee, dash, slide, wall ride, saut : jamais bloqués. |
-| Upgrades | `HeatCapacity` / `HeatRecovery` (`E_UpgradeStat`) lus via `BPC_PlayerStats` au `BeginPlay`. Jamais en dur. |
+| Ajout | `AddHeat(Amount)` → `Clamp(CurrentHeat + Amount, 0, Heat_Max)`. **N'arme aucun délai** : il n'y en a plus. |
+| Retrait | `RemoveHeat(Amount)` → `Clamp(CurrentHeat - Amount, 0, Heat_Max)`. Même clamp, même dispatcher. |
+| Refroidissement continu | `Heat_CoolRateAtSpeed` /s, **uniquement** si `BPC_MovementState.GetHorizontalSpeed() >= Heat_CoolSpeedThreshold`. Appliqué par un timer à fréquence fixe (`Heat_TickInterval`, `07_TUNING §11`). **Jamais en Tick.** |
+| Décroissance passive | **Aucune.** Un joueur qui a fait monter sa jauge puis s'arrête reste chaud aussi longtemps qu'il n'a ni touché une tête, ni repris de la vitesse. **Attendre ne refroidit rien.** |
+| Entrée en `Warning` | `CurrentHeat >= Heat_WarningThreshold`. **`Style_Loss_Heat` s'applique à partir de là**, et jusqu'à ce que la chaleur repasse sous le seuil. |
+| Entrée en `Overheated` | `CurrentHeat >= Heat_Max`. **Le tir continue de partir normalement.** C'est le maximum de la pénalité de style, pas un verrou. |
+| Sortie d'`Overheated` | **Immédiate** dès que `CurrentHeat < Heat_Max`. Pas de durée minimale, pas de seuil de sortie, pas de condition cumulative. |
+| Bloqué par la chaleur | **Rien.** Ni tir, ni melee, ni dash, ni slide, ni wall ride, ni saut. |
+| Reset | `CurrentHeat = 0` à la mort du joueur et au chargement d'un niveau — comme le style (`SPEC_SCORE_RANK §4.3`). Chaque niveau est une performance indépendante. |
+| Upgrades | `HeatCapacity` / `HeatRecovery` (`E_UpgradeStat`) lus via `BPC_PlayerStats` au `BeginPlay`. Jamais en dur. `HeatRecovery` surcharge désormais **`Heat_CoolRateAtSpeed` et `Heat_CoolPerHeadshot`** — `Heat_DecayRate` est `INACTIVE`. |
 
-**Rythme visé** : `Heat_Max / Heat_PerShot` ≈ **9 tirs** consécutifs, puis pause. Un joueur qui enchaîne 9 tirs
-sans bouger a déjà perdu son momentum : la chaleur *sanctionne l'immobilité par le tempo*. Si l'overheat
-n'arrive jamais en playtest, **baisser `Heat_Max`** — ne pas monter `Heat_PerShot`.
+**Rythme visé** : le joueur qui touche ce qu'il vise **ne voit jamais la jauge bouger**. Les repères de
+tempo (`Heat_Max / Heat_PerMissedShot`, `Heat_WarningThreshold / Heat_PerMissedShot`) et la règle de
+réglage sont dans `07_TUNING §11` — pas ici (R3).
 
-**API** : `CurrentHeat` · `CurrentState` · `GetHeatRatio()` (pure) · `IsOverheated()` (pure). Dispatchers
-`OnHeatChanged(Ratio, State)` → `WBP_HeatBar` (bind, pas de Tick), `OnOverheatStarted` / `OnOverheatEnded`,
-`OnWarningEntered`. `BPC_Heat` écrit `HeatRatio` et `OverheatActive` dans `MPC_Global`
-(`08_DATA_SCHEMAS §6`) : les matériaux de l'arme chauffent **sans une ligne de BP supplémentaire**.
+### 4.3 Conséquence : une perte de style, pas un canal de score
 
-| Feedback | `Building` | `Warning` | `Overheated` |
-|---|---|---|---|
-| `WBP_HeatBar` | remplissage froid | **pulse** + couleur chaude | pleine, clignote, icône verrou |
-| Audio | `SC_Laser_Fire` | `SC_Heat_Warning` (loop montant) | `SC_Overheat_Start`, puis `SC_Overheat_Ready` à la sortie |
-| VFX arme | — | émissif piloté par `MPC_Global.HeatRatio` | `NS_OverheatVent` (vapeur au muzzle) en boucle |
-| Anim | idle | idle | **l'arme pend** : `ABP_PlayerArms` → `A_Laser_Overheated`, canon vers le bas. Retour instantané à la sortie. |
-| Clic bloqué | — | — | `SC_Laser_Deny` (clic sec), **pas de shake**, crosshair barré en `OD_Amber_Heat` bref |
+**Tant que `CurrentHeat >= Heat_WarningThreshold`, `Style_Loss_Heat` (`07_TUNING §14`) est appliquée en
+continu** au `BPC_StyleMeter`, par le même timer `Heat_TickInterval` qui gère le refroidissement.
+
+- C'est une perte **continue**, pas un `E_StyleEvent` ponctuel : la chaleur est un **état**. Elle
+  n'entre pas dans `DT_StyleEvents` et n'est donc soumise ni à la dégressivité ni à l'anti-farm
+  (`SPEC_SCORE_RANK §4.4`).
+- Elle se **cumule** avec `Style_DecayPerSec`.
+- **Il n'y a pas de canal de score dédié à la chaleur.** Le style est le seul terme multiplicatif du
+  score (`SPEC_SCORE_RANK §2`) : y brancher la chaleur suffit, et évite un deuxième multiplicateur
+  vivant alimenté par les mêmes entrées (`11_ARBITRAGES D58`, options écartées).
+
+> ### ⏳ Dette datée au J18 — et pourquoi le J9 n'est pas vide pour autant
+>
+> `BPC_StyleMeter` **n'existe qu'au J18**. Le J9 livre donc la jauge, ses sources, ses puits, la
+> couleur de l'arme (`MPC_Global.HeatRatio`) **et un affichage provisoire du coût à l'écran** qui
+> montre **exactement** la perte qui s'appliquera — cf. `SPEC_UI_HUD §3.3`.
+>
+> **Ce n'est pas du confort, c'est une parade.** Une valeur de tuning qui ne pilote rien se calibre
+> à l'aveugle et donne l'illusion de fonctionner : c'est le piège `Laser_TraceRadius`, qui a coûté
+> deux chantiers au J8 (`04_ROADMAP` J8, `12_PIEGES §6.24`). **Pas de pourcentage de score inventé**
+> au J9 : on affiche la **grandeur réelle** — `CurrentHeat` et `Style_Loss_Heat` telle quelle, en
+> unités de style par seconde — jamais une approximation qu'il faudrait défaire au J18.
+> Format exact et exemple chiffré : `SPEC_UI_HUD §3.3a`.
+
+### 4.4 API & feedback
+
+**API** : `CurrentHeat` · `CurrentState` · `AddHeat(Amount)` · `RemoveHeat(Amount)` ·
+`GetHeatRatio()` (pure) · `GetCurrentStylePenalty()` (pure — renvoie `Style_Loss_Heat` si
+`CurrentHeat >= Heat_WarningThreshold`, sinon `0` ; c'est elle qui alimente l'affichage provisoire du
+J9 **et** le câblage réel du J18, sans que rien ne soit à réécrire).
+
+`IsOverheated()` (pure) est **conservée** — elle répond désormais *« la pénalité de style est-elle au
+maximum ? »*, plus jamais *« le tir est-il bloqué ? »*. **Aucun chemin de tir ne doit l'appeler.**
+
+Dispatchers : `OnHeatChanged(Ratio, State)` → `WBP_HeatBar` (bind, pas de Tick) ·
+`OnOverheatStarted` / `OnOverheatEnded` (**conservés** : ils marquent l'entrée et la sortie du maximum
+de pénalité, pas un verrou) · `OnWarningEntered`. `BPC_Heat` écrit `HeatRatio` et `OverheatActive`
+dans `MPC_Global` (`08_DATA_SCHEMAS §6`) : les matériaux de l'arme chauffent **sans une ligne de BP
+supplémentaire**.
+
+| Feedback | `Cooling` | `Building` | `Warning` | `Overheated` |
+|---|---|---|---|---|
+| `WBP_HeatBar` | la barre **descend** visiblement | remplissage froid | **pulse** + couleur chaude **+ coût affiché** (`SPEC_UI_HUD §3.3`) | pleine, clignote, **coût affiché**. **Aucune icône de verrou** |
+| Audio | son court de rachat sur headshot | `SC_Laser_Fire` | `SC_Heat_Warning` (loop montant) | loop de warning entretenu |
+| VFX arme | l'émissif retombe | — | émissif piloté par `MPC_Global.HeatRatio` | `NS_OverheatVent` (vapeur au muzzle) en boucle |
+| Anim | idle | idle | idle | **idle.** L'arme **ne pend plus** : elle tire toujours, elle doit rester pointée |
+| Clic | normal | normal | normal | **normal — le tir part.** Plus aucun clic refusé nulle part |
+
+> **Ce que le feedback doit dire, et ne doit pas dire.** En `Warning` et en `Overheated`, l'arme est
+> **chaude et bruyante, mais fonctionnelle**. Tout signe de verrouillage — icône de cadenas, canon
+> baissé, clic sec, crosshair barré — **ment au joueur** et doit être retiré. Le message est
+> *« tu es en train de payer »*, pas *« tu ne peux plus tirer »*.
+
+> ### 🕮 Note historique — le modèle à verrou, spec'é puis abandonné avant implémentation
+>
+> *Jusqu'au 2026-08-20, ce §4 décrivait un overheat classique : à `Heat_Max` le tir était **bloqué**
+> pendant `Heat_OverheatDuration` (1,5 s), la sortie exigeait `Heat_OverheatDuration` écoulé **ET**
+> `CurrentHeat <= Heat_OverheatExitThreshold`, la décroissance passive tournait à `Heat_DecayRate`
+> après un `Heat_DecayDelay`, accélérée par `Heat_OverheatDecayMultiplier` pendant le verrou. Le
+> feedback comportait une icône de verrou, un `SC_Laser_Deny` sur clic refusé, et une animation
+> d'arme qui pend.*
+>
+> **Ce modèle n'a jamais été implémenté.** Il a été abandonné au J9−1 parce qu'il contredisait le §1
+> de cette même spec : *« le combat est un sous-produit du mouvement, jamais son interruption »*.
+> Le verrou de tir était **la seule interruption du jeu**, et il poussait le joueur à faire de la
+> comptabilité de munitions — l'interdit explicite du §1 (« Munitions = rythme, pas gestion »).
+>
+> *Ce qui reste vrai de cet épisode :* la chaleur devait bien **mesurer quelque chose** et
+> **se voir** ; c'est la **conséquence** qui était mauvaise, pas la jauge. `E_HeatState`,
+> `MPC_Global.HeatRatio`, `WBP_HeatBar` et les dispatchers sont intégralement réutilisés.
+> Les 6 clés du modèle à verrou sont marquées `INACTIVE` dans `07_TUNING §11` et **conservées** en
+> l'état dans `PDA_WeaponData` / `DA_Weapon_Laser` : **inertes, lues par personne.**
 
 ## 5. Headshots
 ### 5.1 Détection — `SphereCollision` dédiée, jamais de bone name
@@ -377,7 +494,9 @@ General) doit être ≤ `HitStop_TimeDilation`, sinon la valeur est silencieusem
 **avant** l'appel : les Sound Cues à modulation temporelle voient leur attaque étirée.
 
 ## 6. `BPC_Melee`
-Composant du **`BP_PlayerCharacter`** (`Weapons/Melee/`), pas de l'arme : le melee reste disponible en overheat.
+Composant du **`BP_PlayerCharacter`** (`Weapons/Melee/`), pas de l'arme : le melee est une action du corps
+et ne dépend d'aucun état de l'arme (§2). Depuis `D58` la chaleur ne bloque plus rien, donc **aucune action
+du joueur n'est conditionnée à l'état de `BPC_Heat`**.
 
 **Décision : `SphereTraceMultiByChannel`, pas d'overlap.** Un volume d'overlap piloté par notify exige un
 composant permanent, produit des faux négatifs quand le joueur traverse un ennemi à 3000 uu/s (overlap manqué
@@ -599,7 +718,9 @@ Sa mise en forme appartient à `SPEC_UI_HUD`.
 | **Melee (swing)** | poids et allonge : un whoosh qui dit la portée avant même de toucher | léger kick de FOV | — | — |
 | **Melee (hit)** | impact **lourd**, contact franc, la frappe « accroche » | `CS_MeleeHit` × `Shake_MeleeHit` + hit-stop `Melee_HitStop` | hitmarker épais | **projeté** (§7), IA suspendue |
 | **Wall slam** | **le pic de satisfaction du jeu** : grave, lourd, plus fort que tout le reste, gerbe + onde + marque murale | `CS_MeleeHit` × `Shake_MeleeHit` + hit-stop | `+WALL SLAM` en gros, gros gain de style | mort quasi certaine (§7.3) |
-| **Overheat** | frustration **lisible et courte** : l'arme vente, le clic répond « non » au lieu de se taire | **aucun shake** (ce n'est pas un impact) | `WBP_HeatBar` verrouillée + clignotante, crosshair barré | — |
+| **Tir raté** | « j'ai payé ça » : la jauge de chaleur **bouge visiblement** au moment du tir manqué, sans casser le rythme du tir suivant | **aucun** | `WBP_HeatBar` +1 cran, monte vers le chaud | — |
+| **Chaleur haute** (`Warning` / `Overheated`) | **coût lisible, pas frustration** : l'arme est chaude, bruyante et **parfaitement fonctionnelle**. Le joueur doit lire *« mon style fond »*, pas *« je ne peux plus tirer »* | **aucun shake** (ce n'est pas un impact) | `WBP_HeatBar` chaude + pulse, **et le coût de style affiché** (`SPEC_UI_HUD §3.3`). **Ni verrou, ni crosshair barré** | — |
+| **Rachat de chaleur** | récompense **immédiate** de la précision et de la vitesse : la jauge **redescend** franchement sur un headshot, et fond en continu au-dessus de `Heat_CoolSpeedThreshold` | — | `WBP_HeatBar` descend, retour au froid | — |
 | **Dégât subi** | la punition se lit sur **la vitesse**, pas sur les PV : voile rouge bref, étouffement du mix, direction de la source | `CS_TakeDamage` × `Shake_TakeDamage` orienté source | `WBP_DamageDirection` + `WBP_SpeedMeter` rouge | — |
 
 **Mixage** : la règle de priorité et l'exemption du wall slam (il doit **toujours** passer, quoi qu'il se
@@ -716,10 +837,24 @@ suivant part au centre du réticule.
 avoir raté · [ ] un tir qui passe « à 4 px » d'un ennemi en pleine course touche · [ ] les headshots
 sont toujours ceux que je vise, et ils tuent en un coup (aucun `−50` surprise sur un tir de tête).
 
-**Heat** — [ ] ~9 tirs déclenchent l'overheat, le tir déclencheur part quand même · [ ] en overheat : tir
-bloqué, melee/dash/slide/wall ride **fonctionnels** · [ ] le clic en overheat produit un son de refus, pas un
-silence · [ ] l'arme pend puis se relève instantanément · [ ] la barre pulse à `Heat_WarningThreshold` ·
-[ ] après un tir isolé la chaleur redescend à 0 sans jamais bloquer.
+**Heat — jauge de discipline de tir (§4, `D58`)** — [ ] **tirer dans un mur fait monter la jauge** ·
+[ ] **toucher une cible au corps ne la fait pas bouger du tout** · [ ] un **headshot** la fait redescendre
+d'un cran net et visible · [ ] **au-dessus de `Heat_CoolSpeedThreshold` la jauge fond en continu**, en
+dessous elle ne bouge pas d'elle-même · [ ] rester immobile chaud : la jauge **ne redescend jamais toute
+seule** · [ ] la barre pulse à `Heat_WarningThreshold` et le **coût de style s'affiche** ·
+[ ] **jauge pleine : le tir part quand même** — vider un chargeur entier dans un mur ne coupe **jamais**
+le tir · [ ] melee / dash / slide / wall ride / saut : **jamais bloqués**, à aucun moment ·
+[ ] **aucun clic refusé, aucun son de deny, aucune icône de verrou, aucun crosshair barré** nulle part ·
+[ ] l'arme **ne pend jamais**, elle reste pointée · [ ] mourir remet la chaleur à 0.
+
+**Heat — affichage provisoire du coût (J9, dette J18)** — [ ] la valeur affichée est bien
+`Style_Loss_Heat` **telle quelle**, en unités de style par seconde, pas un pourcentage de score inventé ·
+[ ] elle apparaît **exactement** quand `CurrentHeat` franchit `Heat_WarningThreshold`, et disparaît
+quand il repasse dessous.
+
+**Heat — ressenti (R8)** — [ ] la jauge me dit **« tu arroses »**, jamais **« attends »** ·
+[ ] je n'ai **jamais** eu à arrêter de tirer pour laisser refroidir · [ ] j'ai eu envie de viser la
+tête **pour refroidir**, pas seulement pour les dégâts.
 
 **Headshot** — [ ] un tir dans la tête d'un Grunt le tue en 1 coup, systématiquement · [ ] le son est
 reconnaissable les yeux fermés · [ ] le hit-stop se sent mais ne coupe pas le mouvement (test en pleine

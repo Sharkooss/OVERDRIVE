@@ -37,7 +37,7 @@
 | 08 | [`08_DATA_SCHEMAS.md`](08_DATA_SCHEMAS.md) | Enums, Structs, DataAssets, DataTables, Curves, MPC | **Données** |
 | 09 | [`09_INPUT.md`](09_INPUT.md) | Enhanced Input, mapping, buffering | **Input** |
 | 10 | [`10_DEFINITION_OF_DONE.md`](10_DEFINITION_OF_DONE.md) | DoD, 8 tests de validation, gates | **Qualité** |
-| 11 | [`11_ARBITRAGES.md`](11_ARBITRAGES.md) | **33 décisions tranchées** là où deux docs se contredisaient | **Arbitrages** |
+| 11 | [`11_ARBITRAGES.md`](11_ARBITRAGES.md) | **D1–D33 + D58** rédigées ici. ⚠️ **D34–D57 existent mais vivent dans `04_ROADMAP.md` / `07_TUNING.md`** — avant de poser un nouveau numéro, `grep -rn "D5[0-9]" Docs/` | **Arbitrages** |
 | 12 | [`12_PIEGES_OUTILLAGE.md`](12_PIEGES_OUTILLAGE.md) | Pièges d'outillage MCP et **erreurs déjà commises** par les agents | **À lire avant d'agir** |
 
 ## Specs système

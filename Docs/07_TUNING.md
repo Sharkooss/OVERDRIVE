@@ -475,19 +475,47 @@ Pas de wall ride sur les props ni sur les ennemis.
 
 ### Heat
 
+> **Refondu le 2026-08-20 — `11_ARBITRAGES D58`.** La chaleur **ne bloque plus jamais le tir**.
+> C'est une **jauge de discipline de tir** : elle monte sur les tirs **ratés**, se rachète par
+> les headshots et par la vitesse, et son seul effet est une **perte de style** (`§14`,
+> `Style_Loss_Heat`). Aucune décroissance passive : le refroidissement se **mérite**.
+> Modèle complet : `SPEC_COMBAT §4`.
+
 | Clé | Valeur | Unité | Statut | Note |
 |---|---|---|---|---|
-| `Heat_Max` | 100 | — | À CALIBRER | |
-| `Heat_PerShot` | 11 | — | À CALIBRER | ≈ 9 tirs avant overheat |
-| `Heat_DecayRate` | 45 | /s | À CALIBRER | |
-| `Heat_DecayDelay` | 0.5 | s | À CALIBRER | délai après le dernier tir |
-| `Heat_OverheatDuration` | 1.5 | s | À CALIBRER | verrou dur |
-| `Heat_OverheatExitThreshold` | 25 | — | À CALIBRER | on peut retirer sous ce seuil |
-| `Heat_OverheatDecayMultiplier` | 1.5 | × | À CALIBRER | refroidit plus vite en overheat |
-| `Heat_WarningThreshold` | 75 | — | À CALIBRER | déclenche le feedback UI/son |
-| `Heat_TickInterval` | 0.05 | s | À CALIBRER | fréquence du timer de décroissance (20 Hz) |
+| `Heat_Max` | 100 | — | À CALIBRER | plafond de la jauge. `CurrentHeat >= Heat_Max` = état `Overheated` = pénalité de style **au maximum**, jamais un verrou de tir |
+| `Heat_WarningThreshold` | 75 | — | À CALIBRER | seuil d'entrée en `Warning` **et** seuil d'application de `Style_Loss_Heat` (`§14`). Déclenche aussi le feedback UI/son |
+| `Heat_PerMissedShot` | **11** | — | **[À CALIBRER]** | **montée — uniquement sur un tir RATÉ**, c'est-à-dire un tir dont le trace ne touche aucun acteur implémentant `BPI_Damageable` (mur, décor, ou rien du tout). **Un tir qui touche une cible ne chauffe pas du tout.** Valeur héritée de `Heat_PerShot`, à rejuger : la fréquence des tirs ratés n'est pas celle des tirs |
+| `Heat_CoolPerHeadshot` | **25** | — | **[À CALIBRER]** | **puits n°1 — montant fixe retiré à chaque headshot.** Le rachat est un acte de précision, pas d'attente. Monter si la jauge reste collée en haut malgré une bonne visée |
+| `Heat_CoolRateAtSpeed` | **20** | /s | **[À CALIBRER]** | **puits n°2 — refroidissement continu tant que la vitesse horizontale dépasse `Heat_CoolSpeedThreshold`.** En dessous du seuil : **zéro** refroidissement |
+| `Heat_CoolSpeedThreshold` | **3000** | uu/s | **[À CALIBRER]** | seuil d'activation de `Heat_CoolRateAtSpeed`. **Volontairement identique au seuil de `Style_Gain_HighSpeedSustain` (`§14`)** — une seule règle à retenir pour le joueur : *au-dessus de 3000, tu gagnes du style **et** ton arme refroidit*. **Les deux valeurs se déplacent ensemble** : en changer une sans l'autre casse la règle et n'a aucun intérêt de design |
+| `Heat_TickInterval` | 0.05 | s | À CALIBRER | fréquence du timer de chaleur (20 Hz) : c'est lui qui applique `Heat_CoolRateAtSpeed` et `Style_Loss_Heat`. **Jamais en Tick** |
+| `Heat_PerShot` | 11 | — | ⛔ **INACTIVE — D58** | remplacée par `Heat_PerMissedShot`. Un tir qui touche ne chauffe plus. **Le champ `HeatPerShot` reste en place dans `PDA_WeaponData` et renseigné dans `DA_Weapon_Laser` : plus aucun code ne doit le lire.** |
+| `Heat_DecayRate` | 45 | /s | ⛔ **INACTIVE — D58** | **il n'y a plus de décroissance passive.** Le refroidissement se mérite (`Heat_CoolPerHeadshot`, `Heat_CoolRateAtSpeed`). Champ inerte dans `PDA_WeaponData` / `DA_Weapon_Laser` |
+| `Heat_DecayDelay` | 0.5 | s | ⛔ **INACTIVE — D58** | plus de décroissance passive, donc plus de délai avant décroissance. Champ inerte |
+| `Heat_OverheatDuration` | 1.5 | s | ⛔ **INACTIVE — D58** | **c'était LE verrou de tir de 1.5 s, supprimé.** Il était la seule interruption du jeu, en contradiction avec `SPEC_COMBAT §1`. Champ inerte |
+| `Heat_OverheatExitThreshold` | 25 | — | ⛔ **INACTIVE — D58** | sans verrou, il n'y a plus de sortie de verrou à conditionner. Champ inerte |
+| `Heat_OverheatDecayMultiplier` | 1.5 | × | ⛔ **INACTIVE — D58** | multipliait une décroissance qui n'existe plus. Champ inerte |
+
+**Rythme visé** : `Heat_Max / Heat_PerMissedShot` ≈ **9 tirs ratés** avant la pénalité de style maximale,
+et `Heat_WarningThreshold / Heat_PerMissedShot` ≈ **7 tirs ratés** avant qu'elle commence à s'appliquer.
+Le joueur qui touche ce qu'il vise ne voit **jamais** la jauge bouger. Celui qui arrose en tenant la
+détente sur des murs paie en style — pas en temps d'attente. Si la jauge ne monte jamais en playtest,
+**monter `Heat_PerMissedShot`** ; si elle reste collée en haut, regarder d'abord les puits
+(`Heat_CoolPerHeadshot`, `Heat_CoolRateAtSpeed`) avant de baisser la montée.
+
+> ### ⛔ D58 — le verrou d'overheat est supprimé (2026-08-20)
+>
+> Les 6 clés marquées `INACTIVE` ci-dessus décrivaient un modèle où l'arme se bloquait pendant
+> `Heat_OverheatDuration`. **Elles ne sont pas supprimées** — même convention que `Dash_GravityScale`
+> (`D31`) et les `BHop_*` (`D52`) : une clé morte qu'on efface revient un jour sous un autre nom.
+> Elles **existent comme propriétés de `PDA_WeaponData`** et sont **renseignées dans
+> `DA_Weapon_Laser`** ; elles y restent, **inertes**. Aucun Blueprint ne doit les lire.
+> Raison de la suppression : `SPEC_COMBAT §1` pose que *« le combat est un sous-produit du mouvement,
+> jamais son interruption »*, et le verrou de tir était la **seule interruption du jeu**.
 
 **Overcharge (upgrade)** : premier tir après refroidissement complet (`Heat = 0`) → `×2.0` dégâts. [À CALIBRER]
+*(Toujours valide sous D58 : `Heat = 0` reste atteignable — il se mérite au lieu de s'attendre.)*
 
 > **Précision** : `Laser_Damage_Head` est **dérivé** de `Laser_Damage_Body × Laser_HeadshotMultiplier`.
 > La source de vérité est le **multiplicateur** ; la valeur absolue n'est là que comme repère de lecture.
@@ -630,12 +658,27 @@ ScoreTime   = max( 0, (ParTime - Time) × 100 )
 | `Style_Gain_HighSpeedSustain` (>3000 uu/s, /s) | +0.10 | À CALIBRER |
 | `Style_Loss_TakeDamage` | −0.75 | À CALIBRER |
 | `Style_Loss_Idle` (<500 uu/s pendant 1 s) | −0.50 | À CALIBRER |
+| `Style_Loss_Heat` (par seconde, tant que `CurrentHeat >= Heat_WarningThreshold`) | **−0.20** | **[À CALIBRER]** — `D58` |
 | `Style_Loss_Death` | reset à 1.0 | À CALIBRER |
 | `Style_MinSpeedForDashGain` | 1500 uu/s | À CALIBRER — anti-spam de dash à l'arrêt |
 | `Style_DiminishPerRepeat` | 0.7 × | À CALIBRER — même event répété = gain × 0.7 cumulatif |
 | `Style_Tier_Thresholds` | 1.5 / 2.5 / 3.5 / 4.5 | À CALIBRER — paliers visuels du HUD |
 | `Style_ResetDiminishAfter` | 4.0 s | À CALIBRER — retour au gain plein |
 
+> **`Style_Loss_Heat`** (`11_ARBITRAGES D58`, 2026-08-20) — **la seule conséquence de la chaleur.**
+> Perte **continue**, appliquée par le timer `Heat_TickInterval` (`§11`) tant que
+> `CurrentHeat >= Heat_WarningThreshold`, jamais un événement ponctuel : la chaleur est un **état**,
+> pas un accident. Elle **n'entre pas dans `E_StyleEvent`** et n'est donc soumise ni à la
+> dégressivité `Style_DiminishPerRepeat` ni à `Style_ResetDiminishAfter` — même traitement que la
+> décroissance de `Style_DecayPerSec`, avec lequel elle se **cumule**.
+> ⚠️ **`Heat_CoolSpeedThreshold` (`§11`) et le seuil de `Style_Gain_HighSpeedSustain` sont la même
+> valeur, volontairement** : au-dessus de 3000 uu/s le joueur gagne du style **et** refroidit son
+> arme. Une seule règle à apprendre. **Changer l'une sans l'autre casse l'intention de D58.**
+>
+> **Dette datée au J18** : `BPC_StyleMeter` n'existe qu'au J18. Au J9, `BPC_Heat` calcule et
+> **affiche** la perte qui s'appliquera (`SPEC_UI_HUD §3.3`) sans que personne ne la consomme.
+> C'est la parade au piège « une valeur de tuning qui ne pilote rien » (`12_PIEGES §6.24`).
+>
 > **`Style_ResetDiminishAfter`** : délai sans répétition d'un event avant que son gain redevienne plein.
 > `Style_DiminishPerRepeat` (0.7 ×) s'applique en cascade tant que le **même** `E_StyleEvent` se répète
 > (kill → ×1.0, kill → ×0.7, kill → ×0.49…). Si ce même event n'est pas rejoué pendant

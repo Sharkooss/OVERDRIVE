@@ -297,12 +297,16 @@ disparaît** — le handle est déjà là (`PC_Overdrive.CrosshairWidget`, type 
 Idle : couche claire à 1.0 · Tir : `Crosshair_Gap` +3 px pendant 0.06 s (`Anim_Fire`) ·
 Heat > `Heat_WarningThreshold` : lerp de `Crosshair_LineColor` vers `OD_Amber_Heat`
 (**le liseré sombre ne change jamais** — c'est lui qui garantit la lecture) ·
-Overheat : traits `OD_Red_Danger`, écart +4 px, **immobiles** (le clignotement est illisible en
-course) · sortie : retour animé 0.2 s. Tous ces états ne touchent que les variables de tuning et
-rappellent `ApplyCrosshairLayout` — aucune valeur n'est écrite dans un slot ailleurs.
+Heat == `Heat_Max` : traits `OD_Red_Danger`, écart +4 px, **immobiles** (le clignotement est illisible
+en course) · retour sous le seuil : retour animé 0.2 s. Tous ces états ne touchent que les variables de
+tuning et rappellent `ApplyCrosshairLayout` — aucune valeur n'est écrite dans un slot ailleurs.
+
+> **`D58`** : ces états signalent un **coût de style**, jamais une indisponibilité. Le crosshair
+> **n'est jamais barré** et le tir part toujours (`SPEC_COMBAT §4`).
 
 **Interdit** : crosshair dynamique lié à la vitesse (perte du point de fixation) · crosshair
-magenta · crosshair entièrement blanc · cercle · contour de visée · `Event Tick`.
+magenta · crosshair entièrement blanc · cercle · contour de visée · `Event Tick` ·
+**crosshair barré ou tout signe de tir refusé** (`D58`).
 
 ### 3.2 `WBP_HealthBar`
 Source `BPC_Health.OnHealthChanged(New,Max,Delta)`. Barre **segmentée en 10 tranches** — on compte des blocs
@@ -316,20 +320,60 @@ PV chiffrés 14 px opacité 0.8 (relevée depuis 0.5 : sur fond clair, 0.5 dispa
 ignorables en course.
 
 ### 3.3 `WBP_HeatBar`
-Source `BPC_Heat.OnHeatChanged(Ratio)` + `OnOverheatStarted/Ended`. Le composant est **sur l'arme**, il
+
+> **Réécrit le 2026-08-20 — `11_ARBITRAGES D58`.** Ce que la jauge **signifie** a changé.
+> Sa forme (8 blocs, sans panneau) et sa couleur (`OD_Amber_Heat`) ne changent pas.
+
+**Ce que la barre dit au joueur** : **une discipline de tir**, pas une réserve de munitions.
+Elle ne répond **plus** à *« combien de tirs me reste-t-il avant d'être bloqué ? »* — plus rien n'est
+bloqué (`SPEC_COMBAT §4`). Elle répond à *« est-ce que j'arrose ? »*, et son coût est du **style**.
+Elle monte sur les **tirs ratés**, descend sur les **headshots** et **au-dessus de
+`Heat_CoolSpeedThreshold`**, et ne redescend **jamais toute seule**.
+
+Source `BPC_Heat.OnHeatChanged(Ratio, State)` + `OnWarningEntered` + `OnOverheatStarted/Ended`
+(ces deux derniers marquent le **maximum de pénalité de style**, et **non plus** un verrou de tir). Le composant est **sur l'arme**, il
 remonte au Character par dispatcher (`05_ARCHITECTURE §3`). Barre **segmentée en 8 blocs**
 (`SPEC_ART_DIRECTION §10.5`, §3.0a) : c'est la forme la plus lisible en vision périphérique, et 8 blocs
 donnent une granularité de 12.5 % — assez fine pour sentir la marge, assez grossière pour se compter d'un
 coup d'œil. Le dernier bloc partiel se remplit en continu, ce qui conserve la lecture de *timing*.
 Ni panneau ni bordure.
-**États** (couleurs de `PALETTE.md §2`) — 0 → 74 % : `OD_Navy_Ink` (état neutre, pas encore une info) ·
-75 → 99 % : `OD_Amber_Heat` + pulse · 100 % : `OD_Red_Danger` + clignotement 6 Hz. Le franchissement de
-`Heat_WarningThreshold` ajoute un SFX (`S_Heat_Warning`) · overheat : blocs `OD_Red_Danger` **inversés**,
-ils se vident en montrant le refroidissement · refroidissement : descente sans animation propre
-(valeur déjà lissée).
-Un trait vertical permanent (2 px `OD_Navy_Ink`, halo blanc) marque `Heat_OverheatExitThreshold` : le joueur
-voit *quand* il pourra retirer — enseigne le système sans tutoriel. **Foncé et non blanc** : à 1 px blanc sur
-un mur blanc, ce repère était invisible.
+
+**États** (couleurs de `PALETTE.md §2`) — sous `Heat_WarningThreshold` : `OD_Navy_Ink` (état neutre,
+pas encore une info) · de `Heat_WarningThreshold` à `Heat_Max` : `OD_Amber_Heat` + pulse ·
+à `Heat_Max` : `OD_Red_Danger` + clignotement 6 Hz. Le franchissement de `Heat_WarningThreshold` ajoute
+un SFX (`S_Heat_Warning`) · **refroidissement** : les blocs se vident **franchement et visiblement** —
+c'est une récompense, elle doit se voir autant que la montée.
+
+**Interdits, depuis `D58`** : ⛔ icône de **verrou** ou de cadenas · ⛔ crosshair **barré**
+(§3.1.7 corrigé) · ⛔ blocs **inversés** signifiant « attends » · ⛔ tout repère de « seuil de
+déblocage » — `Heat_OverheatExitThreshold` est `INACTIVE` (`07_TUNING §11`) et **le trait vertical qui
+le marquait est supprimé**. Aucun élément de l'UI ne doit suggérer que le tir est indisponible :
+**il ne l'est jamais.**
+
+#### 3.3a Affichage provisoire du coût de style — J9, dette J18
+
+À partir de `Heat_WarningThreshold`, la barre affiche **le coût réel qui s'applique**, sous la forme
+d'une ligne courte accolée à la jauge, en `OD_Amber_Heat` :
+
+```
+HEAT 82 · STYLE −0.20/s        ← exemple d'affichage. Les deux nombres sont LUS :
+                                 CurrentHeat, et Style_Loss_Heat (07_TUNING §14)
+```
+
+| Règle | Détail |
+|---|---|
+| Source | `BPC_Heat.GetCurrentStylePenalty()` (`SPEC_COMBAT §4.4`) — **jamais** une valeur recopiée dans le widget. |
+| Apparition | **exactement** au franchissement de `Heat_WarningThreshold`. Disparaît au retour sous le seuil. |
+| Format | La **grandeur réelle**, telle qu'elle sera appliquée au J18 : `Style_Loss_Heat` en unités de style par seconde. |
+| ⛔ Interdit | **Aucun pourcentage de score inventé**, aucune approximation « tu perds ~8 % de ton score ». On affiche ce qui existe, pas ce qu'on imagine — sinon il faudra le défaire au J18. |
+| Bind | `OnHeatChanged`, comme le reste du widget. **Pas de Tick** (`06_CONVENTIONS §4.6`). |
+
+> **Pourquoi cet affichage existe.** `BPC_StyleMeter` n'arrive qu'au **J18** : sans lui, la chaleur
+> livrée au J9 serait une jauge qui bouge et **ne coûte rien**, donc impossible à juger et à calibrer.
+> C'est exactement le piège `Laser_TraceRadius` qui a coûté deux chantiers au J8
+> (`04_ROADMAP` J8, `12_PIEGES §6.24`). Cette ligne rend la mécanique **jugeable dès le J9**.
+> **Elle n'est pas provisoire par paresse** : au J18 la valeur affichée devient la valeur appliquée,
+> et il n'y a rien à réécrire.
 
 ### 3.4 `WBP_DashCharges`
 Source `BPC_Dash.OnDashChargesChanged(Current,Max)` + `OnDashCooldownProgress(Ratio)` (Timer 20 Hz).
@@ -725,14 +769,18 @@ Après `WBP_Results` → `BP_LootChest.Roll(Rank)` → `S_LootRollResult` (drop 
 │  │ Speed kept   │    │ Weapon cools │    │ Raises max   │          │
 │  │ on jump      │    │ down faster  │    │ speed cap    │          │
 │  │              │    │ HEAT RECOV.  │    │ MAX SPEED    │          │
-│  │              │    │  45 ▸ 58.5   │    │ 6000 ▸ 6300  │          │ avant ▸ après
+│  │              │    │   20 ▸ 26    │    │ 6000 ▸ 6300  │          │ avant ▸ après
 │  └──────────────┘    └──────────────┘    └──────────────┘          │
 │   [ 1 ] [ 2 ] [ 3 ]  or  ← →  + ENTER                              │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
 > **Vérification arithmétique des exemples ci-dessus** (`07_TUNING §15` fait foi, aucune valeur n'est inventée) :
-> `VENT` Rare = `+HeatRecovery +30 %` sur `Heat_DecayRate` = 45 → **58.5** (et non +50 %, qui est la valeur Epic).
+> `VENT` Rare = `+HeatRecovery +30 %` sur **`Heat_CoolRateAtSpeed`** = 20 → **26** (et non +50 %, qui est la
+> valeur Epic). ⚠️ **Changé par `11_ARBITRAGES D58`** : `+HeatRecovery` portait sur `Heat_DecayRate` (45 → 58.5),
+> qui est désormais **`INACTIVE`** — il n'y a plus de décroissance passive. L'upgrade surcharge maintenant les
+> deux **puits** de chaleur, `Heat_CoolRateAtSpeed` et `Heat_CoolPerHeadshot` (`SPEC_COMBAT §4.2`) ; la carte
+> n'affiche que le premier, c'est celui que le joueur voit fondre.
 > `OVERDRIVE` Common = `+MaxSpeed +5 %` sur `Speed_HardCap` = 6000 → **6300**.
 > Un `GECKO` Rare afficherait `WALL RIDE 2.0 s ▸ 2.8 s` (`+WallRideDuration +40 %` sur `WallRide_MaxDuration` = 2.0 s).
 > **`MOMENTUM CORE` n'affiche aucune ligne « avant ▸ après »** : c'est un **modificateur de gameplay**
@@ -948,7 +996,9 @@ pendant le gameplay (hitmarker, damage, style : pools) ·
 [ ] à 5000 uu/s la zone centrale 40 % × 40 % est vide hors crosshair
 (D22) · [ ] aucun élément de HUD n'a de panneau ni de bordure (`SPEC_ART_DIRECTION §10.5`) · [ ] la barre de
 heat est bien segmentée en 8 blocs ·
-[ ] HP < 30 % perceptible **sans regarder la barre** · [ ] overheat identifiable en < 0.3 s en périphérie ·
+[ ] HP < 30 % perceptible **sans regarder la barre** · [ ] chaleur au-dessus de `Heat_WarningThreshold`
+identifiable en < 0.3 s en périphérie, **et lue comme un coût, pas comme un blocage** (§3.3, `D58`) ·
+[ ] aucun élément du HUD ne suggère que le tir est indisponible : **ni verrou, ni crosshair barré** ·
 [ ] le retour d'une charge de dash se perçoit sans regarder le widget · [ ] SPEED ne papillonne pas en combat ·
 [ ] pas de clignotement de palier (hystérésis) · [ ] jamais plus de 3 lignes de style simultanées.
 
