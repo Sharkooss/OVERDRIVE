@@ -833,7 +833,46 @@ Modificateurs de gameplay (Rare/Epic uniquement) : `Dash Recharge on Kill` (−0
 | `ChromaticAberration_MaxAtFullSpeed` | 1.5 | — | À CALIBRER |
 | `HitStop_Headshot` | 0.05 | s | À CALIBRER |
 | `HitStop_TimeDilation` | 0.05 | — | À CALIBRER |
+| `HitStop_HeadshotPriority` | 10 | — | **FIXE** — barème de `SPEC_COMBAT §5.4` (`WallSlam = 20`, `Boss = 30`). Pas un curseur |
 | `Restart_FadeDuration` | 0.15 | s | À CALIBRER — **le restart doit être quasi instantané** |
+
+> **Les 3 clés `HitStop_*` de tir vivent sur `PC_Overdrive`** (catégorie `Feedback|HitStop`), pas sur
+> `BPC_HitStop` : le composant est un **service** qui reçoit durée / dilatation / priorité en
+> paramètres, il ne connaît aucun événement de jeu. `HitStop_MinInterval` est la seule clé du
+> composant lui-même, parce que c'est sa politique de cadence à lui. Le melee du J11 passera
+> `Melee_HitStop` (§12) au même service, avec la priorité 20.
+
+### Hitmarker — `WBP_Hitmarker` (J10bis)
+
+Toutes exposées en variables `Instance Editable` sur le widget, catégorie `Feedback|Hitmarker`.
+Le hitmarker de base est un **X de 4 traits diagonaux** ; le palier `Kill` le fait **pivoter de 45°**
+(il devient une croix `+`) et l'agrandit. **La taille par palier n'est pas une géométrie séparée :
+c'est un `RenderScale` posé sur le widget entier**, dont le pivot `(0.5, 0.5)` est le centre de
+l'écran — donc l'agrandissement se fait autour du réticule, exactement là où l'œil est déjà fixé.
+
+| Clé | Valeur | Unité | Statut | Note |
+|---|---|---|---|---|
+| `Hitmarker_StrokeLength` | 10.0 | px | **À CALIBRER** | Longueur d'un trait |
+| `Hitmarker_StrokeThickness` | 2.0 | px | **À CALIBRER** | Épaisseur d'un trait |
+| `Hitmarker_Gap` | 4.0 | px | **À CALIBRER** | Centre → extrémité **intérieure** du trait |
+| `Hitmarker_HaloWidth` | 2.0 | px | **À CALIBRER** | Liseré blanc, **sur chaque bord** (`SPEC_UI_HUD §3.9`) |
+| `Hitmarker_BodyScale` | 1.0 | — | **À CALIBRER** | → traits de 10 px, la valeur de référence de la spec |
+| `Hitmarker_HeadshotScale` | 1.4 | — | **À CALIBRER** | → 14 px |
+| `Hitmarker_KillScale` | 1.6 | — | **À CALIBRER** | → 16 px |
+| `Hitmarker_BodyDuration` | 0.12 | s | **À CALIBRER** | |
+| `Hitmarker_HeadshotDuration` | 0.18 | s | **À CALIBRER** | |
+| `Hitmarker_KillDuration` | 0.25 | s | **À CALIBRER** | |
+| `Hitmarker_KillAngle` | 45.0 | ° | **À CALIBRER** | Rotation du palier `Kill`. 0 = même X que le body shot |
+
+Couleurs (catégorie `Feedback|Hitmarker|Colors`), **HEX sRGB et valeur linéaire** — mêmes tokens que
+`PALETTE.md`, conversion vérifiée au millionième contre `SPEC_UI_HUD §3.1.4` :
+
+| Clé | Token | HEX | Linéaire (R / G / B) |
+|---|---|---|---|
+| `Hitmarker_BodyColor` | `OD_Navy_Ink` | `#1B1730` | `0.010960 / 0.008568 / 0.029557` |
+| `Hitmarker_HeadshotColor` | `OD_Amber_Heat` | `#FFB020` | `1.000000 / 0.434154 / 0.014444` |
+| `Hitmarker_KillColor` | `OD_Magenta_Player` | `#E8336E` | `0.806952 / 0.033105 / 0.155926` |
+| `Hitmarker_HaloColor` | `OD_White_Pure` | `#FBFCFE` | `0.964686 / 0.973445 / 0.991102` |
 
 ### Portage de l'arme (montage PROVISOIRE — J8)
 

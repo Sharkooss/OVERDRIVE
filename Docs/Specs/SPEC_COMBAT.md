@@ -502,6 +502,34 @@ upgrade de PV ne peut casser la règle.
 
 ### 5.4 Hit-stop — `BPC_HitStop`, **sur `PC_Overdrive`**
 
+> **§5.4a — état réel de l'asset (2026-08-21), ce paragraphe fait foi sur deux points.**
+>
+> **1. `ArmRealTimeTimer` n'existe pas en Blueprint — et n'est pas nécessaire.** Aucun nœud BP
+> n'expose de timer insensible au time dilation. La durée réelle s'obtient par un **timer monde
+> de durée `RealDuration × Dilation`** : sous dilatation `d`, le monde avance de `d` seconde par
+> seconde réelle, donc un timer monde de `RealDuration × d` expire après exactement
+> `RealDuration` secondes réelles. C'est algébriquement identique à la spec, sans nœud custom.
+> *(Vérification : `d = 0.05`, `RealDuration = 0.05` → timer monde de `0.0025 s`, soit 3 frames
+> réelles à 60 fps.)*
+>
+> **2. La cadence est mesurée en TEMPS RÉEL, pas en `GameTime`.** Le pseudo-code dit
+> `GameTime - LastHitStopTime`, mais `GameTime` est dilaté — or la garde de cadence sert
+> précisément quand des hit-stops s'enchaînent, c'est-à-dire quand le temps est ralenti.
+> `GetRealTimeSeconds` est utilisé des deux côtés. Identique à la spec quand `d = 1`, correct
+> quand `d < 1`.
+>
+> **Ce qui est conforme sans écart** : priorité strictement supérieure, `HitStop_MinInterval`,
+> propriétaire unique du `Set Global Time Dilation`, `EndHitStop` rappelée au `BeginPlay` **et**
+> à l'`EndPlay` (précaution 2), SFX joué avant l'appel (précaution 5, dans
+> `BP_LaserWeapon.SendHitFeedback`), réservé au headshot (précaution 3).
+> **Précaution 4 non vérifiée en jeu** : `MinGlobalTimeDilation` n'est pas surchargé dans
+> `Config/`, donc il vaut le défaut moteur `0.0001 ≤ 0.05` — mais cela n'a pas été relu à
+> l'exécution.
+>
+> **Appelant** : `PC_Overdrive.NotifyHitConfirmed(bHeadshot, bKilled)`, qui porte les 3 clés
+> `HitStop_Headshot` / `HitStop_TimeDilation` / `HitStop_HeadshotPriority` (`07_TUNING §16`).
+> Le composant ne connaît aucun événement de jeu : c'est un service.
+
 **Un seul propriétaire, le PlayerController.** Il survit au respawn du pawn, contrairement au
 `BP_PlayerCharacter`. `BPFL_Overdrive::DoHitStop` **n'existe pas** : une Function Library ne peut pas
 porter d'état.

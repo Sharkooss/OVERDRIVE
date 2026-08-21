@@ -653,18 +653,47 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 - [x] **50 SFX importés** (`SoundWave`) dans `Audio/SFX/{Combat, Enemy, Movement}`.
 - [x] **Son d'ennemi câblé** : `HitSFX` / `DeathSFX` lus depuis `EnemyData` dans `ApplyDamage`.
 - [x] `BPI_Damageable` + `S_DamageInfo` — faits au J8
-- [ ] **Hitmarker et hit-stop — NON FAITS**, reportés. `BPC_HitStop` sur `PC_Overdrive`
-      (`SPEC_COMBAT §5.4`) et `WBP_Hitmarker` (`§5.3`) restent entiers.
-- [ ] **~40 SFX d'arme et de mouvement non câblés** — ils touchent 5 Blueprints validés
+- [x] **Hitmarker, hit-stop et son de headshot — implémentés le 2026-08-21** (J10bis,
+      `Docs/Journal/2026-08-21_J10bis_Hitmarker_HitStop.md`). **En attente du playtest de Louis :
+      c'est lui qui décide si le Test 4 passe** (R8 / R10).
+      → **`BPC_HitStop`** (`Core/`, sur `PC_Overdrive`) — propriétaire **unique** du time dilation.
+      `RequestHitStop(RealDuration, Dilation, Priority) → bAccepted`, priorité strictement
+      supérieure, cadence `HitStop_MinInterval`, `EndHitStop` rappelée au `BeginPlay` **et** à
+      l'`EndPlay` (anti-freeze). **D59** — la durée « en temps réel » de la spec est obtenue par
+      un timer monde de durée `RealDuration × Dilation` : Blueprint n'expose aucun timer non
+      dilaté, et le monde avançant au rythme `Dilation`, les deux sont exactement équivalents.
+      → **`WBP_Hitmarker`** (`UI/HUD/`) — X de 4 traits diagonaux + halo blanc (8 `Image`),
+      3 paliers `Body / Headshot / Kill` **sans enum** (deux booléens et la priorité
+      `Kill > Headshot > Body` de `SPEC_UI_HUD §3.9`). La taille et la rotation du palier sont un
+      `RenderScale` / `RenderTransformAngle` posés sur **le widget entier**, dont le pivot
+      `(0.5, 0.5)` est le centre de l'écran — donc un seul réglage par palier au lieu de
+      re-calculer 8 slots. Géométrie **mesurée en PIE** : `off = 6.364 px`, halo `14 × 6`,
+      cœur `10 × 2`, angles `±45°` — conforme au calcul `(Gap + Length/2) × √2/2`.
+      → **Son de headshot** : `DA_Weapon_Laser.headshotSFX` = `S_Laser_Hit_Head_01`, joué en 2D
+      **avant** l'appel au hit-stop (`SPEC_COMBAT §5.4` précaution 5). `fireSFX` et `impactSFX`
+      remplis au passage — `PlayFireFX` les jouait déjà depuis le J8, **les trois slots étaient
+      simplement vides**.
+      → Chaîne : `ProcessHit` → `SendHitFeedback` → `PC_Overdrive.NotifyHitConfirmed` →
+      hit-stop (si headshot) + hitmarker. **`ProcessHit` n'a reçu qu'un seul nœud** (16 → 17) :
+      le graphe validé au J8 n'a pas été réécrit.
+- [ ] **~40 SFX de mouvement non câblés** — ils touchent 5 Blueprints validés
       (`BP_LaserWeapon`, `BPC_Dash`, `BPC_Slide`, `BPC_WallRide`, `BPC_MovementState`) et exigent une
       passe dédiée avec des Sound Cues `SC_*` (`SPEC_AUDIO §8.3` règle 3).
 - [ ] **`ABP_Enemy`** — les 6 animations sont importées, **rien ne les joue** : le Grunt est en pose
       de référence.
 - [ ] **Test** : un headshot procure une vraie satisfaction (Test 4)
-      → ⚠️ **NON VALIDÉ.** Le headshot **fonctionne** (validé par Louis le 2026-08-20 : tir à la tête
-      létal, deux tirs au corps), mais le Test 4 porte sur la **satisfaction**, qui dépend du
-      hitmarker, du hit-stop et du son distinct — **aucun des trois n'existe**. La gate S2 reste
-      ouverte sur ce point.
+      → ⏳ **EN ATTENTE DE PLAYTEST.** Le headshot fonctionnait déjà (validé par Louis le
+      2026-08-20 : tir à la tête létal, deux tirs au corps) ; le Test 4 porte sur la
+      **satisfaction**. Les trois retours qui la portent — visuel, temporel, sonore — **existent
+      depuis le 2026-08-21** mais **n'ont pas encore été joués**. Rien n'est coché ici tant que
+      Louis n'a pas eu la manche en main (R8).
+      → ⚠️ **Ce qui N'A PAS pu être vérifié sans lui** : le tir headless (`PressKey` de
+      `SlateInspector`) est resté sans effet dans cette session d'éditeur — `Windows("list")` rend
+      `[]` et `CaptureEditorImage` répond *« Failed to capture any editor windows »*. Le tir n'est
+      donc **jamais parti** (`BeamEnd` relu à `(0,0,0)`, PV de l'ennemi inchangés), et **aucun
+      pixel du hitmarker n'a été regardé** — ce que `12_PIEGES §5.43` exige explicitement pour
+      une feature d'UI. Ce qui **est** prouvé en PIE : le widget est instancié, sa géométrie est
+      calculée juste, le composant est en place et ses valeurs sont bonnes.
 
 > **Journée coûteuse en débogage, et la leçon est écrite.** Le one-shot systématique a demandé
 > **six diagnostics avant le bon**, dont deux faussés par mes propres sondes. Trois pièges neufs en
