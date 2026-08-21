@@ -80,6 +80,7 @@ le knockback doit s'appliquer même si la cible est morte, et l'appelant seul sa
 | `BPC_Health` | PV, dégâts, mort, i-frames. **Partagé avec les ennemis.** |
 | `BPC_PlayerStats` | Applique les upgrades sur toutes les valeurs de tuning |
 | `BPC_StyleMeter` | Multiplicateur de style, gains, décroissance |
+| `BPC_PlayerAudio` | **Sons de mouvement du joueur** (J11). Porte les tableaux de variantes `SoundBase[]`, le tirage aléatoire et le pitch ±`Audio_PitchVariance` (`SPEC_AUDIO §8.3 r3`). **Il ne s'abonne à rien lui-même** : `BP_PlayerCharacter` écoute les dispatchers des `BPC_*` (`§8.2`) et appelle ses fonctions sans paramètre. C'est ce qui permet de câbler tout l'audio de mouvement **sans modifier une ligne** de `BPC_MovementState` / `Slide` / `Dash` / `WallRide`. Le routage sur `E_MovementState` vit dans l'`EventGraph` du pawn, faute de pouvoir déclarer un paramètre d'enum (`12_PIEGES §5.2`) |
 | `ABP_PlayerArms` | Animation bras FP + arme |
 | `BP_DeathCam` | Caméra temporaire de mort. Prend le view target pendant le fade, rendue au pawn au respawn |
 
@@ -109,7 +110,7 @@ Un seul état actif à la fois. `Dashing` peut être entré depuis n'importe que
 | `BP_Enemy_Grunt` / `_Shooter` / `_Tank` | Enfants. **Ne redéfinissent que le comportement, pas les stats** |
 | `BP_AIController_Enemy` | Contrôleur commun. Perception + StateTree |
 | `ST_Enemy_Shooter` / `ST_Enemy_Tank` | StateTree, **uniquement pour ces 2 archétypes** (plugin `GameplayStateTree` déjà actif) |
-| `ABP_Enemy` | Animation Blueprint commun aux 3 archétypes (`BS_Enemy_Locomotion` + états d'attaque/mort) |
+| `ABP_Enemy` | Animation Blueprint commun aux 3 archétypes (`BS_Enemy_Locomotion` + états d'attaque/mort). **État réel au J11 : un seul `SequencePlayer` sur `A_Enemy_Idle` en boucle → `OutputPose`.** Assigné par `SetAnimInstanceClass` en queue de `BP_EnemyBase.ApplyEnemyVisuals` — donc **dans le graphe** (`12_PIEGES §5.56`) et **en littéral**, faute de pouvoir porter une référence de classe dans `PDA_EnemyData` (même famille que `§5.2`). À redécouper au J13 si le Tank exige son propre ABP |
 | `BPC_KnockbackReceiver` | Reçoit l'impulsion melee, détecte l'impact mural, applique `WallSlam_Damage` |
 | `BP_EnemyProjectile` | Projectile du Shooter |
 | `BP_EnemyActivationVolume` | Volume placé dans le level. Active / désactive les ennemis d'une section (cf. `EnemyScan_Rate`, `DeactivateBehindDistance`) |

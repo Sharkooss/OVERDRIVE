@@ -55,9 +55,25 @@
 
 **Décision : pas de footsteps.** À 1000–5000 uu/s une boucle de pas est soit inaudible, soit une mitraillette. Elle est remplacée par les événements discrets ci-dessous, qui portent tous une information de gameplay.
 
+> ### 🔊 Retours de playtest — sons à refaire à la passe de sound design poussée
+>
+> Relevés par Louis **manche en main le 2026-08-21**, une fois les sons enfin joués en jeu. Le
+> câblage n'est pas en cause : ce sont les **échantillons** qu'il faut resynthétiser
+> (`Art_Source/Audio/synth/overdrive_sfx.py`, tout est calculé, rien n'est emprunté).
+>
+> | Son | Retour de Louis | Piste |
+> |---|---|---|
+> | **`S_WallRide_Enter`** ×2 | *« il sonne pas bien »* | La spec demande « claquement + résonance ». Le claquement est probablement trop sec / la résonance absente : on n'entend pas qu'on **s'accroche** à quelque chose. À reprendre en visant la matière du mur, pas l'impact. |
+> | **`S_Jump`** ×3 | *« un peu trop trop fort / sec et aigu »* | La spec dit pourtant **« attaque douce, queue nulle », −8 dB** : l'échantillon actuel contredit sa propre fiche. Baisser le niveau, adoucir l'attaque, descendre le contenu spectral. C'est le son le plus fréquent du jeu après le tir — il doit se faire oublier. |
+>
+> Tout le reste a été validé à cette passe (tir, impacts, atterrissages, dash, slide, wall jump,
+> chaleur, ennemis) : *« à part ça on est good »*. Les deux curseurs immédiats restent
+> `Audio_PitchVariance` et `Audio_MovementVolume` (`07_TUNING §16`), mais ils ne corrigeront pas le
+> timbre — il faut regénérer.
+
 | Asset | Déclencheur | Description sonore | Durée | Var. | Sp. | dB | Prio |
 |---|---|---|---|---|---|---|---|
-| `S_Jump` | `Jump` | souffle court, attaque douce, corps bruité filtré, queue nulle | 120 ms | 3 | 2D | −8 | **P0** |
+| `S_Jump` | `Jump` | souffle court, attaque douce, corps bruité filtré, queue nulle | 120 ms | 3 | 2D | −8 | **P0** ⚠️ **à resynthétiser** — cf. encadré ci-dessus |
 | `S_Land_Light` | atterrissage sous seuil | clic mat + basse courte, pas de queue | 150 ms | 3 | 2D | −10 | **P0** |
 | `S_Land_Heavy` | atterrissage au-dessus du seuil | impact sub 60 Hz + noise burst, queue 200 ms | 400 ms | 3 | 2D | −4 | **P0** |
 | `S_Dash` | `BPC_Dash.OnDashPerformed` | whoosh synthétique, sweep descendant 4 kHz → 400 Hz, attaque immédiate | 250 ms | 2 | 2D | −3 | **P0** |
@@ -66,7 +82,7 @@
 | `S_Slide_Loop` | pendant `Sliding` | boucle de bruit filtré band-pass ~1.2 kHz, seamless | boucle | 1 | 2D | −9 | **P0** |
 | `S_Slide_End` | sortie de slide | queue descendante, decay 250 ms | 250 ms | 2 | 2D | −10 | **P0** |
 | `S_WallRide_Loop` | pendant `WallRiding` (via `MS_WallRide`) | frottement métallique tonal, résonance qui **monte** à l'approche de `WallRide_MaxDuration` | boucle | 1 | 2D | −7 | **P0** |
-| `S_WallRide_Enter` | accroche au mur | claquement + résonance | 180 ms | 2 | 2D | −6 | **P0** |
+| `S_WallRide_Enter` | accroche au mur | claquement + résonance | 180 ms | 2 | 2D | −6 | **P0** ⚠️ **à resynthétiser** — cf. encadré §5 |
 | `S_WallJump` | wall jump | impact + whoosh, plus aigu que `S_Jump` | 220 ms | 2 | 2D | −4 | **P0** |
 | `S_BHop_Perfect` | hop dans `BHop_PerfectWindow` | **note musicale** courte, montante à chaque hop chaîné (jusqu'à 5 degrés) | 120 ms | 5 (pitchés) | 2D | −8 | **P0** |
 | `S_Wind_Loop` | via `MS_Wind_Speed`, toujours actif | bruit rose filtré, stéréo large | boucle | 2 couches | 2D | variable | **P0** |
@@ -454,6 +470,29 @@ Outils gratuits : **Audacity** · **Bfxr / jsfxr / ChipTone** (générateurs 8-b
 | Impacts, morts d'ennemis | `BP_EnemyBase`, via les soft refs `HitSFX`/`DeathSFX` de `PDA_EnemyData` | data-driven, pas de branche par type |
 | UI | `WBP_*` directement | — |
 | Vent, boucles | `AudioComponent` persistant créé au `BeginPlay` | jamais spawné à répétition |
+
+> **§8.2a — état réel au 2026-08-21 (J11), ce paragraphe fait foi.**
+>
+> **Aucun `SC_*` n'existe et aucun toolset MCP ne sait créer un `SoundCue`.** La « variation
+> obligatoire » de `§8.3 r3` est donc obtenue par **tableaux `SoundBase[]` + index aléatoire +
+> pitch aléatoire ±`Audio_PitchVariance`**, ce qui rend exactement ce qu'un `Random` + `Modulator`
+> de Cue rendrait. **Remplaçable par un `SC_*` sans toucher un seul graphe** : il suffira de mettre
+> le Cue seul dans le tableau.
+>
+> | Famille | Où vivent les variantes | Qui joue |
+> |---|---|---|
+> | Saut, wall jump, atterrissage, dash, slide, wall ride | `BPC_PlayerAudio`, 9 tableaux | `BP_PlayerCharacter` route les dispatchers → `BPC_PlayerAudio.Play*()` |
+> | Tir, impact décor, headshot, chaleur | `PDA_WeaponData`, 4 tableaux → `DA_Weapon_Laser` | `BP_LaserWeapon.PlayFireFX` / `SendHitFeedback` / event lié `OnWarningEntered` |
+> | Hit et mort d'ennemi | `PDA_EnemyData.HitSFX` / `DeathSFX` | `BP_EnemyBase.ApplyDamage` (J10, inchangé) |
+>
+> **Les 4 composants de mouvement ne jouent aucun son eux-mêmes.** C'est la règle « déclencher sur
+> les dispatchers » prise au pied de la lettre, et elle a une vertu qui n'était pas annoncée : tout
+> l'audio de mouvement s'est câblé **sans modifier une ligne** de `BPC_MovementState`, `BPC_Slide`,
+> `BPC_Dash` ni `BPC_WallRide` — les 4 composants validés manche en main entre le J4 et le J8.
+>
+> **Pas encore câblé** : les 4 **boucles** (`S_Slide_Loop`, `S_WallRide_Loop`, `S_Wind_Loop` ×2),
+> qui exigent un `AudioComponent` persistant avec fondus (`§8.3 r4`) → J14 ; et `S_Dash_Ready`,
+> faute de dispatcher de rechargement de charge sur `BPC_Dash`.
 
 ### 8.3 Anti-spam et pooling
 
