@@ -198,6 +198,12 @@ Valeurs de départ : `Docs/07_TUNING.md §13`.
 | `StyleGainOnKill` | Float |
 | `KnockbackResistance` | Float (0–1) |
 | `bCanBeWallSlammed` | Bool |
+| `KnockbackAirDrag` | Float — *(J11, `D61`/`D62`)* frottement latéral pendant le vol : le **poids** de l'ennemi |
+| `KnockbackMinImpulse` | Float — *(J11, `D62`)* seuil de décollage |
+| `KnockbackMaxFlightTime` | Float — *(J11, `D62`)* durée max de la fenêtre slammable |
+| `WallSlamMinImpactSpeed` | Float — *(J11, `D62`)* seuil de dégâts muraux |
+| `WallSlamDamage` | Float — *(J11, `D62`)* plafond de dégâts de slam |
+| `WallSlamDamagePerSpeed` | Float — *(J11, `D62`)* pente |
 | `SkeletalMesh` / `AnimBP` / `AIControllerClass` / `StateTree` | soft refs |
 | `HitVFX` / `DeathVFX` / `HitSFX` / `DeathSFX` | soft refs |
 | `ProjectileClass` | soft class (Shooter uniquement) |
