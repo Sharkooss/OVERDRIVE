@@ -476,7 +476,43 @@ Source `GS_Overdrive.OnKillCountChanged(Kills,Total)`. `12 / 24` aligné à droi
 halo blanc, opacité 0.8. Chaque kill : pop 1.0→1.15→1.0 en 0.15 s. À `Kills == Total` : `OD_Amber_Heat` +
 `ALL CLEAR` 14 px pendant 2 s.
 
-### 3.9 `WBP_Hitmarker`
+### 3.9 `WBP_Hitmarker` — **implémenté le 2026-08-21** (`Content/OVERDRIVE/UI/HUD/WBP_Hitmarker`)
+
+> **§3.9a — état réel de l'asset, ce paragraphe fait foi.** Le reste de §3.9 décrit l'intention ;
+> voici ce qui existe.
+>
+> **Arbre** — `CanvasPanel HitmarkerRoot` → 8 `Image` : `Halo_A..D` puis `Stroke_A..D` (l'ordre
+> d'ajout est l'ordre de dessin, donc les halos sont **derrière**). Tous ancrés `(0.5, 0.5)`,
+> alignment `(0.5, 0.5)`, `bAutoSize = false`. Brush `DrawAs = RoundedBox`,
+> `RoundingType = FixedRadius`, rayons **0** — un rectangle plein sans aucune texture à créer
+> (`12_PIEGES §5.43`).
+>
+> **Géométrie**, calculée par `ApplyHitmarkerLayout` au `PreConstruct` depuis 4 clés de
+> `07_TUNING §16` : `off = (Gap + Length/2) × √2/2`, les 4 traits aux positions `(±off, ±off)`,
+> angles `+45°` sur la diagonale `\` (A, D) et `−45°` sur la diagonale `/` (B, C). Le halo est le
+> trait **agrandi de `HaloWidth` sur chaque bord**. Mesuré sur l'instance PIE :
+> `off = 6.364`, halo `14 × 6`, cœur `10 × 2`.
+>
+> **Les 3 paliers ne redessinent rien.** `ShowHitmarker(bHeadshot, bKilled)` ne change que
+> (1) la teinte des 4 traits, (2) un `SetRenderScale` et (3) un `SetRenderTransformAngle`
+> **sur le widget entier**. Le pivot de rendu d'un `UserWidget` plein écran est `(0.5, 0.5)`,
+> c'est-à-dire le centre de l'écran — donc l'échelle et la rotation se font autour du réticule,
+> et un palier coûte **un seul réglage** au lieu de recalculer 8 slots.
+> Correspondance avec les tailles de la spec : `BodyScale 1.0 → 10 px`, `1.4 → 14`, `1.6 → 16`.
+>
+> **Aucun enum, aucune animation UMG.** Le palier se choisit sur deux booléens dans l'ordre
+> `Kill > Headshot > Body` (la priorité de §3.9), et la disparition est un
+> `SetTimerByFunctionName("HideHitmarker", Duration)` — **pas** de fondu ni de scale-punch animé.
+> C'est un choix R4 assumé : le prototype livre l'apparition à 0 frame et la durée par palier ;
+> le fondu et le punch sont du polish J14, et aucun outil du projet ne crée une animation UMG.
+>
+> **Contradiction de doc, tranchée.** `SPEC_COMBAT §5.3` donne le hitmarker de **headshot** en
+> `OD_Magenta_Player` pivoté 45°, alors que §3.9 réserve ce traitement au palier **Kill** et met
+> le headshot en `OD_Amber_Heat`. Les deux disent la même chose en pratique : le Grunt a
+> `bHeadshotIsLethal = true`, donc **tout headshot est un kill** et déclenche bien le magenta à
+> 45°. L'implémentation suit §3.9 (4 paliers), qui est le sur-ensemble. `OD_Amber_Heat` ne sera
+> visible que sur une cible dont le headshot n'est **pas** létal — le Tank du J13.
+
 Source `BP_LaserWeapon.OnHitConfirmed(Target, bHeadshot, bKilled)` (`SPEC_COMBAT §3`) / `BPC_Melee.OnMeleeHit`.
 4 traits diagonaux, apparition **à 0 frame de délai**, tous avec halo blanc 2 px.
 Body : `OD_Navy_Ink` 10 px 0.12 s · Headshot : `OD_Amber_Heat` 14 px 0.18 s · Kill :
