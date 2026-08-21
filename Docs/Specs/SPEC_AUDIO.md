@@ -72,6 +72,16 @@
 | `S_Wind_Loop` | via `MS_Wind_Speed`, toujours actif | bruit rose filtré, stéréo large | boucle | 2 couches | 2D | variable | **P0** |
 | `S_Speed_Threshold` | passage 3000 / 4000 / 5000 uu/s | souffle bref + note grave | 300 ms | 3 | 2D | −12 | P2 |
 
+> **Nommage de `S_Wind_Loop` — décision 2026-08-20.** La colonne « Var. » vaut *2 couches*, pas 2 variantes.
+> Les fichiers `S_Wind_Loop_01` (lit rose 120–2500 Hz) et `S_Wind_Loop_02` (bande 3–6 kHz, §4.2) sont donc
+> des **couches à superposer**, jamais deux alternatives à tirer au sort. Un Sound Cue qui les mettrait dans
+> un nœud `Random` serait un bug. Même logique pour toute future ligne dont « Var. » dit « couches ».
+>
+> **Les trois boucles sont des placeholders.** `MS_Wind_Speed` (§4.2) et `MS_WallRide` (§4.3) génèrent leur
+> bruit dans le moteur (`Noise (Pink)` → `Ladder Filter`) : aucun Wave Player, donc aucun sample à terme.
+> Les WAV existent pour que le mouvement se calibre **avant** que les MetaSounds soient montés (§9, S1).
+> `S_Slide_Loop` n'a pas de MetaSound et reste, lui, un vrai sample définitif.
+
 ### 2.2 Combat
 
 | Asset | Déclencheur | Description sonore | Durée | Var. | Sp. | dB | Prio |
@@ -395,7 +405,16 @@ qu'un son en est tiré. **Sans ce tableau à jour, la publication est bloquée.*
 | **MusicRadar — Free Sample Packs** | royalty-free | `musicradar.com/news/tech/free-music-samples` | Synthés et drums pour fabriquer ses propres SFX (§ recette ci-dessous) |
 | **Zapsplat** | gratuit **avec attribution** (ou Gold sans) | `zapsplat.com` | Large catalogue de dépannage — l'attribution est une contrainte réelle, à n'utiliser qu'en dernier recours |
 | **OpenGameArt** (filtre CC0) · **Incompetech** (CC-BY) | variable — **vérifier par asset** | `opengameart.org` · `incompetech.com` | Dépannage, musique de secours |
+| **Synthèse procédurale du projet** — `Art_Source/Audio/synth/` | **aucune licence tierce** : les échantillons sont calculés, rien n'est emprunté | *(interne)* | `S_Laser_Fire` · `S_Laser_Hit_Body` / `_Head` · `S_Laser_Impact_Surface` · `S_Heat_Warning` · `S_Enemy_Hit` · `S_Enemy_Death` · `S_Jump` · `S_Land_Light` / `_Heavy` · `S_Dash` · `S_Dash_Ready` · `S_Slide_Start` / `_Loop` / `_End` · `S_WallRide_Enter` / `_Loop` · `S_WallJump` · `S_Wind_Loop` |
 | *(à compléter)* | | | |
+
+> **Sur la synthèse procédurale.** Les WAV ne sont pas la source : ce sont les **paramètres** du dict `P` de
+> `overdrive_sfx.py` qui le sont. `Art_Source/Audio/out/` est gitignoré et se régénère par
+> `python overdrive_sfx.py`. Conséquence pratique : réécouter et corriger un son coûte une minute, pas une
+> session Audacity — c'est ce qui rend l'itération de R4 (« prototype → test → c'est fun ? ») réellement
+> praticable sur l'audio. `analyze.py` mesure durée, niveau, centroïde et **qualité du raccord des boucles** ;
+> `audition.py` fabrique les montages d'écoute en contexte, avec les dB relatifs de §2 déjà appliqués.
+> Aucune de ces mesures ne dit si un son est bon (R8) — elles disent seulement s'il est conforme à §2.
 
 ⚠ **À éviter** : BBC Sound Effects (licence RemArc = **non commercial**) · YouTube Audio Library sans vérifier la
 ligne de licence · tout sample « free » sans page de licence explicite.
