@@ -714,3 +714,33 @@ matérialise sa sonde) · **`5.75`** (un acteur posé fige les défauts d'un com
 Amendés : `5.70` (l'`UserConstructionScript` n'est pas un refuge fiable) et `2.2c` (contrôle par
 **tally de `type_id`** — c'est lui qui a trouvé les deux graphes empilés, le contrôle d'orphelins
 étant aveugle à un empilement).
+
+## Incident de fin de journée — `git switch` sous éditeur ouvert (`12_PIEGES §3.5`)
+
+Le merge vers `main` a échoué à mi-parcours : l'éditeur Unreal était **encore ouvert** et verrouillait
+`BP_EnemyBase.uasset` et `L_Sandbox_Movement.umap`.
+
+```
+error: unable to unlink old 'Content/OVERDRIVE/Enemies/Base/BP_EnemyBase.uasset': Invalid argument
+```
+
+`git switch main` a **changé la branche** puis renoncé à remplacer les deux fichiers : `HEAD` sur
+`main`, deux `.uasset` portant le contenu de la branche. **La copie de travail était à cheval sur
+deux branches**, et `git status` les affichait comme de simples « modifications locales » — une
+invitation à les écraser sans réfléchir, c'est-à-dire à refaire `3.4`.
+
+**R11 vaut dans les deux sens** : *éditeur fermé avant de basculer*, pas seulement avant d'ouvrir.
+Je n'ai pas appliqué la règle que le projet s'est donnée précisément pour ça.
+
+**Sortie, sans perte, dans cet ordre :**
+1. `git push` de la branche **immédiatement** — ça ne touche pas la copie de travail et met le
+   commit `d59a352` à l'abri sur le remote avant toute manipulation ;
+2. fermeture de l'éditeur par Louis ;
+3. **preuve avant d'écraser** : `git diff feat/j11-melee-wallslam -- <les 2 fichiers>` → **vide**,
+   donc le disque portait bien les octets de la branche ;
+4. `git checkout --` puis `merge --no-ff` → réinstallation d'octets identiques.
+
+L'étape 3 est celle qui distingue cet incident de `3.4` : là-bas, un `git checkout --` lancé sur
+une supposition avait écrasé des `.uasset` dont personne ne savait plus d'où ils venaient.
+
+**Merge : `884dc73`. `main` poussé. Copie de travail propre.**
