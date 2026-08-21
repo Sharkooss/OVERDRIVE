@@ -676,11 +676,28 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       → Chaîne : `ProcessHit` → `SendHitFeedback` → `PC_Overdrive.NotifyHitConfirmed` →
       hit-stop (si headshot) + hitmarker. **`ProcessHit` n'a reçu qu'un seul nœud** (16 → 17) :
       le graphe validé au J8 n'a pas été réécrit.
-- [ ] **~40 SFX de mouvement non câblés** — ils touchent 5 Blueprints validés
-      (`BP_LaserWeapon`, `BPC_Dash`, `BPC_Slide`, `BPC_WallRide`, `BPC_MovementState`) et exigent une
-      passe dédiée avec des Sound Cues `SC_*` (`SPEC_AUDIO §8.3` règle 3).
-- [ ] **`ABP_Enemy`** — les 6 animations sont importées, **rien ne les joue** : le Grunt est en pose
-      de référence.
+- [x] **SFX de mouvement et d'arme câblés — le 2026-08-21** (J11,
+      `Docs/Journal/2026-08-21_J11_Anim_SFX.md`). **30 des 50 WAV sont joués** (17 mouvement +
+      13 arme), plus les 9 sons d'ennemi du J10. **En attente du playtest de Louis.**
+      → **La crainte « ils touchent 5 Blueprints validés » était infondée.** `SPEC_AUDIO §8.2`
+      impose de déclencher sur les **dispatchers**, jamais sur l'input — donc tout se câble depuis
+      l'extérieur. **`BPC_MovementState`, `BPC_Slide`, `BPC_Dash` et `BPC_WallRide` n'ont reçu
+      aucune modification.** Seuls `BP_PlayerCharacter` (+18 nœuds de routage) et `BP_LaserWeapon`
+      (+9) ont bougé.
+      → Nouveau composant **`BPC_PlayerAudio`** : 9 tableaux `SoundBase[]`, tirage aléatoire,
+      pitch ±5 %. **Pas de `SC_*`** — aucun toolset MCP ne crée un `SoundCue` ; les tableaux rendent
+      la même chose et se remplaceront par un Cue sans toucher aux graphes (`SPEC_AUDIO §8.2a`).
+      → `PlayLanding` consomme **`bWasHardImpact`**, que `OnLandedSpeed` diffusait déjà : pas de
+      second seuil concurrent (R3).
+      → **Restent** les 4 boucles (slide, wall ride, vent ×2 — exigent un `AudioComponent`
+      persistant, `§8.3 r4`) et `S_Dash_Ready` (pas de dispatcher de recharge sur `BPC_Dash`) → J14.
+- [x] **`ABP_Enemy` — le Grunt est en idle depuis le 2026-08-21** (J11). `SequencePlayer` sur
+      `A_Enemy_Idle` en boucle → `OutputPose`, assigné par `SetAnimInstanceClass` **en queue de
+      `ApplyEnemyVisuals`** — donc dans le graphe (`12_PIEGES §5.56`) et visible **dans l'éditeur**.
+      → **L'asset vide a été créé à la main par Louis** : aucun toolset ne crée un `AnimBlueprint`
+      (choisir un squelette ouvre une modale, qui fige l'éditeur — cf. le J1). Même famille que les
+      enums et les `AnimSequence`.
+      → Les 5 autres animations restent inutilisées jusqu'à la FSM du **J13**.
 - [ ] **Test** : un headshot procure une vraie satisfaction (Test 4)
       → ⏳ **EN ATTENTE DE PLAYTEST.** Le headshot fonctionnait déjà (validé par Louis le
       2026-08-20 : tir à la tête létal, deux tirs au corps) ; le Test 4 porte sur la
@@ -729,6 +746,14 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 - [ ] Camera tilt, camera shakes `CS_*`
 - [ ] `NS_LaserImpact`, `NS_Muzzle`, `NS_Headshot`, `NS_EnemyDeath`, `NS_Dash`
 - [ ] SFX placeholder sur toutes les actions P0
+      → **largement fait au J11** : 30 des 50 WAV câblés. Restent les **4 boucles**
+      (`S_Slide_Loop`, `S_WallRide_Loop`, `S_Wind_Loop` ×2 — exigent un `AudioComponent` persistant
+      avec fondus, `SPEC_AUDIO §8.3 r4`, et le vent un volume piloté par la vitesse) et
+      `S_Dash_Ready` (pas de dispatcher de recharge sur `BPC_Dash`).
+      → ⚠️ **2 échantillons à resynthétiser**, relevés par Louis manche en main le 2026-08-21 :
+      **`S_WallRide_Enter`** (« il sonne pas bien » — l'accroche ne s'entend pas) et **`S_Jump`**
+      (« trop fort / sec et aigu », alors que sa fiche dit « attaque douce », −8 dB).
+      Détail dans l'encadré « Retours de playtest » de `SPEC_AUDIO §5`.
 - [ ] `MPC_Global` + speed lines
 - [ ] **⏳ Dette J9 à solder — `MPC_Global.HeatRatio` / `OverheatActive`** (`08_DATA_SCHEMAS §6`) :
       couper le J9 sur ce point était volontaire — écrire dans une collection que **aucun matériau

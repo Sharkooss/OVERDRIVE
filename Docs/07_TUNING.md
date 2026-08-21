@@ -842,6 +842,18 @@ Modificateurs de gameplay (Rare/Epic uniquement) : `Dash Recharge on Kill` (−0
 > composant lui-même, parce que c'est sa politique de cadence à lui. Le melee du J11 passera
 > `Melee_HitStop` (§12) au même service, avec la priorité 20.
 
+### Audio du joueur — `BPC_PlayerAudio` (J11)
+
+| Clé | Valeur | Unité | Statut | Note |
+|---|---|---|---|---|
+| `Audio_PitchVariance` | 0.05 | — | **À CALIBRER** | Pitch aléatoire ±5 % sur chaque one-shot — la « variation obligatoire » de `SPEC_AUDIO §8.3 r3`. À 0, toutes les répétitions sonnent identiques |
+| `Audio_MovementVolume` | 1.0 | — | **À CALIBRER** | Multiplicateur global des sons de mouvement |
+
+> **Il n'y a volontairement PAS de clé de seuil pour l'atterrissage lourd.** `BPC_MovementState`
+> tranche déjà lourd/léger et le diffuse dans `OnLandedSpeed(ImpactSpeed, bWasHardImpact)` :
+> l'audio consomme ce booléen. Un second seuil ici créerait **deux vérités concurrentes** sur la
+> même question — c'est exactement ce que R3 existe pour empêcher.
+
 ### Hitmarker — `WBP_Hitmarker` (J10bis)
 
 Toutes exposées en variables `Instance Editable` sur le widget, catégorie `Feedback|Hitmarker`.
