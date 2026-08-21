@@ -596,9 +596,14 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       Ligne chiffrée `HEAT 11.0 | STYLE -0.20/s`, **cachée** sous `Heat_WarningThreshold`, **visible**
       au-dessus. ⛔ Aucun pourcentage inventé — `CurrentHeat` et `GetCurrentStylePenalty()` sont lus.
       ⛔ Ni icône de verrou, ni crosshair barré, ni clic refusé.
-      → **Reporté au J19** (habillage, R4) : remplissage **continu** du dernier bloc, pulse en
-      `Warning`, clignotement 6 Hz à `Heat_Max`, SFX `S_Heat_Warning`. Le dispatcher
-      `OnWarningEntered` existe déjà et se déclenche, il n'a pas encore d'abonné.
+      → **Reporté au J19** (habillage, R4) : ~~remplissage **continu** du dernier bloc~~,
+      pulse en `Warning`, clignotement 6 Hz à `Heat_Max`.
+      → ✅ **Le remplissage continu a été AVANCÉ au J11** (`D66`, 2026-08-21) sur demande de Louis :
+      `alpha = Clamp(DisplayRatio × 8 − Index, 0, 1)` + `FInterpTo(HeatBarFillSpeed)` dans le Tick
+      du widget. `SetHeat` n'a pas été modifiée.
+      → ✅ **`S_Heat_Warning` a été câblé au J11-audio** (event lié `BPC_Heat.OnWarningEntered` dans
+      `BP_LaserWeapon`) : le dispatcher **a** un abonné depuis le 2026-08-21.
+      Restent au J19 : le pulse et le clignotement.
       → **Provisoire et daté** : c'est `BPC_Heat` qui crée la jauge et la pousse (`PC_Overdrive` n'a
       aucun accès au composant). Au J19 `WBP_HUD` s'abonne à `OnHeatChanged` — 3 nœuds à retirer.
 - [ ] **⏳ DETTE DATÉE AU J18 — câblage réel de `Style_Loss_Heat`.** `BPC_StyleMeter` n'existe qu'au
@@ -698,12 +703,16 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
       (choisir un squelette ouvre une modale, qui fige l'éditeur — cf. le J1). Même famille que les
       enums et les `AnimSequence`.
       → Les 5 autres animations restent inutilisées jusqu'à la FSM du **J13**.
-- [ ] **Test** : un headshot procure une vraie satisfaction (Test 4)
-      → ⏳ **EN ATTENTE DE PLAYTEST.** Le headshot fonctionnait déjà (validé par Louis le
-      2026-08-20 : tir à la tête létal, deux tirs au corps) ; le Test 4 porte sur la
-      **satisfaction**. Les trois retours qui la portent — visuel, temporel, sonore — **existent
-      depuis le 2026-08-21** mais **n'ont pas encore été joués**. Rien n'est coché ici tant que
-      Louis n'a pas eu la manche en main (R8).
+- [x] **Test** : un headshot procure une vraie satisfaction (Test 4)
+      → ✅ **VALIDÉ par Louis le 2026-08-21**, manche en main : *« c'est good j'ai testé ça me
+      convient »*. Le headshot fonctionnait déjà (2026-08-20 : tir à la tête létal, deux tirs au
+      corps) ; le Test 4 portait sur la **satisfaction**, et les trois retours qui la portent —
+      hitmarker (visuel), hit-stop (temporel), `S_Laser_Hit_Head_01` (sonore) — sont livrés au
+      J10bis et au J11. **Reporté dans `10_DEFINITION_OF_DONE §3`.**
+      → ⚠️ Ce qui n'a **jamais** pu être vérifié sans lui reste vrai et vaut pour la suite : le tir
+      headless (`SlateInspector.PressKey`) est sans effet dans cet éditeur — `Windows("list")` rend
+      `[]`. **Aucun pixel de hitmarker n'a été regardé par un outil** ; c'est l'œil de Louis qui a
+      fait foi (`12_PIEGES §5.43`).
       → ⚠️ **Ce qui N'A PAS pu être vérifié sans lui** : le tir headless (`PressKey` de
       `SlateInspector`) est resté sans effet dans cette session d'éditeur — `Windows("list")` rend
       `[]` et `CaptureEditorImage` répond *« Failed to capture any editor windows »*. Le tir n'est
@@ -719,11 +728,175 @@ Légende : `[ ]` à faire · `[~]` en cours · `[x]` fait · `[!]` bloqué · `[
 > l'échelle) — et une règle : **`CLAUDE.md` R12 — devant un bug, on instrumente, on fait tester
 > Louis, on lit le chiffre. Et on valide l'instrument avant de lui faire confiance.**
 
-### J11 — Melee & wall slam
-- [ ] `BPC_Melee` : sphere trace, montage, cooldown
-- [ ] Knockback + `BPC_KnockbackReceiver`
-- [ ] Détection d'impact mural + dégâts
-- [ ] **Test** : écraser un ennemi contre un mur est la meilleure sensation du jeu
+### J11 — Melee & wall slam  *(implémenté le 2026-08-21, cf. `Docs/Journal/2026-08-21_J11_Melee_WallSlam.md`)*
+- [x] `BPC_Melee` : sphere trace, cooldown — **montage reporté**
+      → composant **autonome** sur `BP_PlayerCharacter` (`Weapons/Melee/`) : 15 variables,
+      6 fonctions, `EventGraph` de 2 nœuds. Aucun des 4 `BPC_*` de mouvement n'a été touché.
+      → `MultiSphereTraceByChannel` depuis la **caméra** sur `ControlRotation` brute, canal `Weapon`
+      (`TraceTypeQuery3`), rayon `Melee_Radius`, portée `Melee_Range`. Dédoublonnage **par acteur**
+      via `HitActorsThisSwing` (`SPEC_COMBAT §13.5`) : une cible touchée à la fois sur sa capsule
+      et sur sa `HeadHitbox` ne prend les dégâts **qu'une fois**.
+      → **Le montage `AM_Melee_Punch` n'existe pas et n'était pas nécessaire** : `SPEC_COMBAT §6`
+      prévoit le **filet de sécurité** (un `Set Timer by Event(Melee_WindupTime)` en parallèle de
+      l'`AN_MeleeHit`). Ici il n'y a que le timer, et `bSwingResolved` empêche déjà le double coup
+      le jour où l'anim arrivera. **Le gameplay ne dépend d'aucun asset d'anim** — J14.
+- [x] Knockback + `BPC_KnockbackReceiver`
+      → composant **autonome** sur `BP_EnemyBase` (`Enemies/Base/`) : 17 variables, 5 fonctions,
+      `EventGraph` de 10 nœuds (`BeginPlay` + `Tick`).
+      → `LaunchCharacter(XY+Z override)`, **jamais `Simulate Physics`** (`SPEC_COMBAT §7.1`).
+      Pas d'appel à `SetMovementMode(Falling)` : `CMC::HandlePendingLaunch` le fait déjà.
+      → **`LastFrameVelocity` échantillonnée par un Tick actif UNIQUEMENT pendant le vol**
+      (`SPEC_COMBAT §13.6`) — `SetComponentTickEnabled(false)` au `BeginPlay` et à la fermeture
+      de fenêtre. Le composant ne coûte rien tant que personne ne frappe.
+      → **Il lit lui-même `EnemyData`** (`KnockbackResistance`, `bCanBeWallSlammed`) en castant son
+      owner : **zéro nœud ajouté au `BeginPlay` validé de `BP_EnemyBase`**.
+      → **`bNotifyRigidBodyCollision` et `bUseCCD` posés dans le graphe** au `BeginPlay`, pas en
+      propriété (`12_PIEGES §5.15`/`§5.56`) — parades `SPEC_COMBAT §13.7` et `§13.8`.
+- [x] Détection d'impact mural + dégâts
+      → `Event Hit` de `BP_EnemyBase` → `OnOwnerHit`. Garde `bIsAirborneFromKnockback && !bSlamConsumed`,
+      mur reconnu par `abs(ImpactNormal.Z) < WallSlam_MaxNormalZ`, seuil `WallSlam_MinImpactSpeed`,
+      dégâts `Clamp(ImpactSpeed × WallSlam_DamagePerSpeed, 0, WallSlam_Damage)`,
+      **`Instigator` = le joueur**, jamais le mur (crédit de score, `E_StyleEvent.WallSlamKill`).
+      → Anti-blocage : `Knockback_MaxFlightTime` armé systématiquement, fenêtre aussi fermée par
+      `Event Landed` et par le slam (`SPEC_COMBAT §13.12`).
+- [x] **`D60` — deux clés disaient la même chose, elles ont été séparées.** `SPEC_COMBAT §7.2`
+      gardait le décollage avec `WallSlam_MinImpactSpeed` (1500) alors que `07_TUNING §13` définit
+      `Knockback_MinImpulse` (800) comme exactement ce seuil. **Décollage → `Knockback_MinImpulse`,
+      dégâts muraux → `WallSlam_MinImpactSpeed`.** Spec réécrite.
+- [x] **Hit-stop et hitmarker** : `PC_Overdrive.NotifyMeleeHit(Duration, bKilled)` (8 nœuds) —
+      `RequestHitStop(Melee_HitStop, HitStop_TimeDilation, HitStopMeleePriority = 20)` + hitmarker.
+      **Un seul hit-stop par swing** (`bHitStopThisSwing`), quel que soit le nombre de cibles.
+      `BPC_HitStop` reste le **propriétaire unique** du time dilation (`SPEC_COMBAT §5.4`).
+- [x] **Refonte après le 1ᵉʳ playtest** — *« il va beaucoup trop loin c'est abusé »*, *« je veux un
+      vrai impact… il prend très vite de la vitesse mais l'ennemi est grand et lourd donc il freine
+      très vite »*, *« sinon tout fonctionne, on peut kill quand il touche un mur »*.
+      → **`D61` — la cause était dans le moteur, pas dans une valeur.** `CMC.FallingLateralFriction`
+      vaut **0** par défaut : en `MOVE_Falling` sans input, **rien** ne freine l'horizontale.
+      L'ennemi partait à 3500 uu/s et gardait *exactement* 3500 jusqu'au sol — « poids plume » est
+      la description littérale du profil. Nouvelle clé **`Knockback_AirDrag` = 2.5 /s** poussée dans
+      `FallingLateralFriction` au décollage et **restaurée** à sa valeur d'origine en fin de fenêtre
+      → décroissance **exponentielle**, perte maximale juste après l'impact.
+      `Melee_Knockback` **3500 → 2800**, et `WallSlam_MinImpactSpeed` **1500 → 900** (avec la
+      traînée, un seuil à 1500 réduisait la fenêtre de slam à ~330 uu et aurait cassé la seule chose
+      que Louis a validée). Vol ~875 uu au lieu de ~2100.
+      → **`D62` — le piège de la journée, et il est structurel.** Les nouvelles valeurs étaient
+      écrites **et relues correctes** sur le CDO *et* sur le template SCS, et les 6 Grunts en PIE
+      lisaient toujours `AirDrag = 0` / `MinImpactSpeed = 1500`. **Un acteur déjà posé fige sa propre
+      copie des défauts d'un composant**, et PIE clone le monde éditeur, pas le CDO. Sauver et
+      recharger la map n'y change rien (`12_PIEGES §5.75`). Correctif = ce que
+      `10_DEFINITION_OF_DONE §5` exigeait déjà : **6 propriétés déplacées vers `PDA_EnemyData`**,
+      lues au `BeginPlay` par `CacheRefs` (20 → 32 nœuds), variables du composant passées en
+      **caches non `Instance Editable`**. Effet de bord bienvenu : **la traînée devient per-ennemi**,
+      le Tank freinera plus fort que le Grunt sans une ligne de code.
+      → **`ReceiveKnockbackImpulse` s'était empilé à 46 nœuds** (chaque nœud en double) après une
+      écriture avortée : l'ennemi aurait été **lancé deux fois par coup**, et ça compilait vert.
+      Invisible au contrôle d'orphelins (la chaîne empilée est reliée à elle-même) ; trouvé par
+      **comptage des `type_id`**. Purgé et réécrit → 25 nœuds, 0 doublon (`12_PIEGES §2.2c`).
+- [x] **Refonte après le 2ᵉ playtest** — *« il ne prend pas assez de recul »* + *« quand je l'envoie
+      à la verticale, genre je regarde le ciel, il part méga super haut !! »*.
+      → **`D63` — un seul bug expliquait les deux plaintes.** `Impulse = Camera.Forward × Knockback`
+      était **la formule de la spec**, et nez au zénith `Camera.Forward = (0,0,1)` : toute l'impulsion
+      devenait verticale (3100 uu/s → **apex ~49 m**), puisque `Knockback_AirDrag` ne freine que le
+      **latéral**. La même cause raccourcissait le recul : dès qu'on visait un peu haut, une part de
+      l'impulsion partait en altitude au lieu d'aller loin.
+      → Le pitch **sort** de la direction : `Dir = MakeRotator(0, ControlRotation.Yaw, 0).Forward`.
+      `Melee_KnockbackUp` devient la **seule** source de vertical → temps de vol constant (~0.61 s)
+      quel que soit le regard. Le clamp de pitch a été écarté : à 4500 uu/s même 25° donnent encore
+      ~2000 uu de vertical, et il aurait fallu recalibrer l'angle à chaque changement de la clé.
+      **Le yaw seul règle le cas par construction, pas par dosage.**
+      → C'est gratuit en gameplay : `SPEC_COMBAT §7.3` exclut déjà sols et plafonds du slam
+      (`WallSlam_MaxNormalZ`), **un mur se vise au yaw**. Et le **trace** reste sur la caméra complète,
+      pitch compris — on frappe toujours un ennemi en contrebas.
+      → **`Melee_Knockback` 2800 → 4500** : l'impulsion étant entièrement horizontale, elle va
+      **entièrement** dans la distance. Portée ~1400 uu (contre 875), freinage toujours net
+      (4500 → ~980 uu/s à l'atterrissage). La vitesse ne passe sous `WallSlam_MinImpactSpeed` qu'après
+      l'atterrissage : **toute la trajectoire est slammable.**
+- [x] **Refonte après le 3ᵉ playtest** — *« encore un poil plus de force »* + *« un peu plus de
+      verticalité, il rase un peu trop le sol quand on vise haut »*.
+      → **`D64` — le pitch revient, mais sur l'axe Z SEULEMENT.** `D63` avait supprimé *toute*
+      influence du regard vertical : trop absolu. Ce qu'il fallait tuer n'était pas la verticalité,
+      c'est que **le pitch pilotait la direction** — donc une impulsion non bornée sur un axe sans
+      traînée. Désormais `Lift = Melee_KnockbackPitchBoost × sin(Clamp(Pitch, 0°, 90°))` **ajouté**
+      à `Melee_KnockbackUp`, et `Impulse = MakeVector(Dir.X·K, Dir.Y·K, Up + Lift)`.
+      **Les deux axes sont indépendants** : viser haut ajoute du Z sans retirer d'horizontale, le
+      vertical est borné par une **clé** et non par un angle à recalibrer, et viser vers le bas
+      n'ajoute rien. Apex au zénith : **326 uu** contre 4900 avant `D63`.
+      → **`Melee_Knockback` 4500 → 5500**, portée ≈ 1720 uu. La clé a fait `3500 → 2800 → 4500 →
+      5500` : ce n'est pas de l'hésitation, `D63` a changé entre-temps **ce que la valeur signifie**.
+      → **Piège attrapé au contrôle, pas en jeu** : la forme `Up × (KnockbackUp + Lift)` résolvait
+      l'addition en nœud `vector+vector` **à pins flottants**, avec une promotion float→vecteur
+      implicite. Le résultat était *peut-être* juste — et « peut-être » n'est pas un diagnostic
+      (R12). Réécrit en `MakeVector` explicite. Nouveau piège **`12_PIEGES §5.76`**.
+- [x] **Refonte après le 4ᵉ playtest (`D65`)** — croquis de Louis : la trajectoire n'était pas une
+      parabole mais *« il part fort à l'horizontale, puis ralentit et monte, ensuite redescend d'un
+      coup »*.
+      → **Le croquis était un diagnostic.** Constante de temps horizontale `1/AirDrag = 0.40 s`
+      contre un vol de 1.63 s : l'horizontale perdait 87 % au premier quart, l'ennemi **finissait de
+      monter sur place** puis retombait à la verticale. `D61` n'était pas faux, il était **mal dosé
+      par rapport au temps de vol**. Règle posée : **`1/Knockback_AirDrag ≥ t_air`**.
+      → `Knockback_AirDrag` 2.5 → **0.6** · `Melee_KnockbackUp` 300 → **600** (à 300 l'apex faisait
+      46 uu, l'arc était invisible) · `Melee_Knockback` 5500 → **2700** · `Knockback_MaxFlightTime`
+      1.2 → **2.5** (anti-blocage, doit dépasser le vol le plus long) · `WallSlam_MinImpactSpeed`
+      900 → **700** (doit rester sous la vitesse de fin de vol la plus basse).
+      → ⚠️ **2700 n'est pas « moins de force » que 5500** : la portée dépend de la clé **et** de la
+      traînée. À `k = 2.5` il fallait 5500 pour 1720 uu ; à `k = 0.6`, **2700 donnent 2342 uu**.
+      → Profil : **48 %** de vitesse horizontale restante à l'atterrissage (contre 13 %) — la
+      trajectoire avance jusqu'au bout, donc l'arc est une vraie parabole, et le ralentissement
+      reste lisible (−52 %). **Aucun graphe modifié, uniquement du tuning.**
+- [x] **Knockback VALIDÉ par Louis le 2026-08-21**, 5ᵉ playtest : *« là le recul et tout est good »*.
+      Les passes `D61` → `D65` sont closes.
+- [x] **Portée du melee + polish HUD (`D66`)** — *« il faut vraiment être collé, avec la vitesse ça
+      casse un peu le rythme »*, + fondus sur les marqueurs et remplissage animé de la jauge de heat.
+      → `Melee_Range` 220 → **400**, `Melee_Radius` 60 → **120**. La portée utile n'est pas `Range`
+      seule mais **`Range + Radius + rayon de la cible`** : ~350 → **~590 uu**. À 2000 uu/s, 350 uu
+      se franchissent en 0.17 s — d'où le « collé ». **Aucun graphe modifié.**
+      ⚠️ `DoMeleeTrace` ne teste **aucune occlusion** (choix assumé du J8nonies) : 120 est le plafond
+      raisonnable sur un module de grille, au-delà on frapperait à travers une cloison fine.
+      → **Aucun toolset MCP ne crée de `WidgetAnimation`** (famille `SoundCue` / `AnimBlueprint`) :
+      les deux effets sont pilotés par le **`Tick` du widget**, réglables par une clé, remplaçables
+      par une timeline **sans toucher aux appelants**. `ShowHitmarker` et `SetHeat` gardent leur
+      signature.
+      → `WBP_Hitmarker` : fondu d'entrée `HitmarkerFadeInTime` (0.03 s), fondu de sortie sur le
+      reste du palier, `SafeDivide` des deux côtés. Le `HideTimer` n'est plus armé — **une seule
+      horloge** pilote l'effet. Couleurs, échelles et angles des 3 paliers **inchangés**.
+      → `WBP_HeatBar` : `DisplayRatio` rejoint `CurrentRatio` par `FInterpTo(HeatBarFillSpeed = 9)`,
+      et `ApplyBlock` passe du binaire au **continu** (`Lerp(Color_Empty → ActiveColor, alpha)`).
+      **`SetHeat` n'a pas été réécrite** — elle contient la ligne de texte, et son `type_id` de
+      `SetText` est du genre à mentir (`12_PIEGES §5.72`). Ses 8 `ApplyBlock` deviennent inoffensifs.
+      → **Piège** : le 1ᵉʳ `write_graph_dsl` sur l'`EventGraph` du hitmarker l'a **empilé** (45 nœuds,
+      tout en double). Pour un `EventGraph` la purge n'est pas « tout sauf le `FunctionEntry` » mais
+      **tout, sans exception**. Trouvé par tally de `type_id`, pas par le contrôle d'orphelins.
+      → ⚠️ **Aucun pixel regardé** (`12_PIEGES §5.43`) : les deux effets sont prouvés
+      structurellement, pas visuellement. Le pipeline de capture ne répond pas dans cet éditeur.
+- [x] **Test** : écraser un ennemi contre un mur est la meilleure sensation du jeu
+      → ✅ **VALIDÉ par Louis le 2026-08-21**, au **6ᵉ** playtest : *« on est vraiment good là, c'est
+      parfait, le tuning ça me convient »*. Le fond était acquis dès le 1ᵉʳ (*« on peut kill quand
+      il touche un mur et tout ça marche bien »*) ; les 5 passes suivantes n'ont porté que sur la
+      **courbe d'éjection** et la portée du coup — `D61` (le poids) → `D63` (le bug du zénith) →
+      `D64` (la verticalité au regard) → `D65` (la parabole) → `D66` (la portée).
+      → **Ce que la journée a coûté et pourquoi** : 6 manches. Aucune n'a produit un bug de
+      logique — les six retours portaient sur le **modèle** ou le **dosage**, jamais sur du code
+      cassé. Même profil que le J6 (wall ride), à l'opposé du J5 (dash, 6 passes de réparation).
+      → ⏳ **Le polish HUD de `D66` (fondus + jauge animée) n'a PAS de validation explicite** : il a
+      été livré dans la même passe que la portée du melee, et le retour de Louis parle du *tuning*.
+      **Aucun pixel n'a été regardé par un outil** (`12_PIEGES §5.43`). À confirmer d'un mot.
+      → Ce qui **était** prouvé en PIE, sur les
+      il touche un mur ») ; c'est le **poids** qui est en jeu maintenant. Ce qui **est** prouvé en PIE, sur les
+      instances : les 8 clés de `BPC_Melee` et les 7 de `BPC_KnockbackReceiver` sont aux valeurs de
+      `07_TUNING §12`/`§13` ; `bRefsCached = true` des deux côtés ; `CachedPC` pointe la vraie
+      `PC_Overdrive` ; `knockbackResistance = 0` et `bCanbeWallSlammed = true` **relus depuis
+      `DA_Enemy_Grunt`** ; capsule du Grunt en `bNotifyRigidBodyCollision = true` **et**
+      `bUseCCD = true`. Zéro orphelin sur les 13 graphes, tout compile en `warnings_as_errors`.
+      → ⚠️ **Le coup lui-même n'a pas été tiré** : `SlateInspector.PressKey` reste sans effet dans
+      cet éditeur (`Windows("list")` → `[]`, déjà constaté au J10bis). Personne n'a mesuré un vol,
+      un impact mural ni un dégât de slam.
+- [ ] **Reporté au J13, volontairement** : `StopLogic`/`ResumeLogic` (aucun `AIController` n'existe
+      encore), `PlayStagger()`, `PlayBounce()`, `A_Enemy_GetUp` (aucune de ces 3 animations n'existe
+      — le set du Grunt est `Idle`/`Walk`/`Run` + les 3 clips de charge). Les **branches** de
+      `SPEC_COMBAT §7.4` sont en place et ferment proprement la fenêtre ; il ne leur manque que
+      l'habillage.
+- [ ] **Reporté au J14** : `AM_Melee_Punch` + slot Upper Body, SFX de swing (aucun WAV de melee
+      dans les 50 importés), VFX d'impact et son de wall slam.
 
 ### J12 — Ennemi de base
 - [ ] `BPC_Health`, `BP_EnemyBase`, `PDA_EnemyData`

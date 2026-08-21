@@ -157,9 +157,29 @@ Chaque `Handle_*` **pousse** la valeur dans le sous-widget via une fonction publ
 | Cas | Solution autorisée |
 |---|---|
 | Valeur événementielle (HP, kills, dash, overheat, **vies**) | Dispatcher direct. |
-| Valeur continue (vitesse, style, heat) | Le composant émet au changement significatif ou sur le **timer unique 20 Hz** de `BPC_MovementState` (D9, `SPEC_VFX §3.1`). Jamais de Tick widget, jamais un second timer. |
-| Lissage visuel | **Animation UMG** ou `Timeline` dans le sous-widget, déclenchée par le setter. |
+| Valeur continue (vitesse, style, heat) | Le composant émet au changement significatif ou sur le **timer unique 20 Hz** de `BPC_MovementState` (D9, `SPEC_VFX §3.1`). **Jamais de Tick widget pour LIRE l'état du jeu**, jamais un second timer. |
+| Lissage visuel | **Animation UMG** ou `Timeline` dans le sous-widget, déclenchée par le setter. **À défaut (`D66`) : un Tick de widget qui n'anime QUE des variables déjà poussées** — voir l'encadré ci-dessous. |
 | Pulse / glow | **Material** (`Time`, `MPC_Global`), zéro logique BP. |
+
+> **`D66` (2026-08-21, J11) — précision de la règle « jamais de Tick widget », qui était trop large
+> pour être appliquée telle quelle.** La règle existe pour empêcher un widget d'**aller chercher**
+> l'état du jeu image par image (cast vers le pawn, lecture de vélocité…) : c'est ce qui casse
+> l'isolation des sous-widgets et duplique la source de vérité. Elle ne visait pas l'animation.
+>
+> Or **aucun toolset MCP ne crée de `WidgetAnimation`** (même famille que `SoundCue` au J11 et
+> `AnimBlueprint` au J10), donc la solution prescrite pour le « lissage visuel » est, aujourd'hui,
+> inaccessible à l'outillage. Le Tick de widget est la seule voie restante.
+>
+> **La ligne exacte, désormais :**
+> - ❌ **interdit** — un Tick de widget qui *lit* l'état du jeu (cast, `GetPlayerPawn`, vélocité…) ;
+> - ✅ **autorisé** — un Tick de widget qui n'interpole que des **variables déjà poussées** par le
+>   setter public, sans jamais rien lire d'extérieur au widget.
+>
+> Les deux usages du J11 sont dans le second cas : `WBP_HeatBar.Tick` interpole `DisplayRatio` vers
+> `CurrentRatio` que `SetHeat` a écrit ; `WBP_Hitmarker.Tick` fait décroître un compteur posé par
+> `ShowHitmarker`. **Aucun des deux ne caste quoi que ce soit**, et les deux widgets restent
+> testables seuls dans le designer. Le jour où une `WidgetAnimation` est créée à la main, les deux
+> Ticks sautent **sans que les appelants changent** — les signatures publiques sont intactes.
 
 **Le `WBP_HUD` est le SEUL widget qui connaît le joueur, le GameState et le GameInstance.** Les sous-widgets
 ne castent jamais et ne cherchent jamais le pawn : ils reçoivent des données par fonction publique, donc
@@ -403,7 +423,7 @@ d'entrée, poussé par le composant (aucun binding, aucun Tick widget, conforme 
 |---|---|---|
 | 8 blocs, sans panneau | ✅ | — |
 | Couleurs `OD_Navy_Ink` / `OD_Amber_Heat` / `OD_Red_Danger` | ✅ 4 variables `Instance Editable` cat. `HeatBar\|Colors` — `Color_Empty` (navy α 0.22), `Color_Normal` (navy α 1), `Color_Warning` (ambre), `Color_Max` (rouge) | — |
-| Bloc partiel « qui se remplit en continu » | ❌ **binaire** : le bloc `i` est plein si `Ratio × 8 > i` | La granularité continue est portée par la **ligne chiffrée**, qui affiche `CurrentHeat` exact. Reporté au **J19**, avec `WBP_HUD`. |
+| Bloc partiel « qui se remplit en continu » | ✅ **fait au J11** (`D66`, 2026-08-21) — `alpha = Clamp(DisplayRatio × 8 − Index, 0, 1)`, couleur = `Lerp(Color_Empty → ActiveColor, alpha)` | Était binaire au J9 et reporté au J19 ; **avancé au J11 sur demande de Louis**. `DisplayRatio` rejoint `CurrentRatio` par `FInterpTo(HeatBarFillSpeed = 9)` dans le `Tick` du widget (`D66`, cf. §2), donc les blocs s'allument en cascade au lieu de sauter. `SetHeat` **n'a pas été modifiée**. |
 | Pulse en `Warning`, clignotement 6 Hz à `Heat_Max` | ❌ | Animation UMG — **juice**, donc J14/J19 (R4). Le J9 livre la mécanique, pas son habillage. |
 | SFX `S_Heat_Warning` au franchissement | ❌ | Le dispatcher `OnWarningEntered` **existe et se déclenche** ; il n'a pas encore d'abonné. J14. |
 | Séparateur `·` de l'exemple `HEAT 82 · STYLE −0.20/s` | ⚠️ **`\|`** et un signe `-` ASCII : `HEAT 11.0 \| STYLE -0.20/s` | Chaîne construite par `Utilities\|String\|BuildString(Float)` (`12_PIEGES §2.40`) ; caractères non-ASCII évités dans le DSL. Cosmétique, à repasser au J19. |
@@ -501,10 +521,17 @@ halo blanc, opacité 0.8. Chaque kill : pop 1.0→1.15→1.0 en 0.15 s. À `Kill
 > Correspondance avec les tailles de la spec : `BodyScale 1.0 → 10 px`, `1.4 → 14`, `1.6 → 16`.
 >
 > **Aucun enum, aucune animation UMG.** Le palier se choisit sur deux booléens dans l'ordre
-> `Kill > Headshot > Body` (la priorité de §3.9), et la disparition est un
-> `SetTimerByFunctionName("HideHitmarker", Duration)` — **pas** de fondu ni de scale-punch animé.
-> C'est un choix R4 assumé : le prototype livre l'apparition à 0 frame et la durée par palier ;
-> le fondu et le punch sont du polish J14, et aucun outil du projet ne crée une animation UMG.
+> `Kill > Headshot > Body` (la priorité de §3.9).
+>
+> **Mise à jour `D66` (2026-08-21, J11) — le fondu existe.** Le `SetTimerByFunctionName("HideHitmarker")`
+> du J10bis est **supprimé** : l'effet est désormais piloté par le `Tick` du widget, seule horloge.
+> `ShowHitmarker` arme `MarkerElapsed` / `MarkerDuration` / `bMarkerActive` et pose
+> `RenderOpacity = 0` ; le Tick monte l'opacité sur **`HitmarkerFadeInTime`** (0.03 s) puis la fait
+> décroître sur tout le reste du palier, `SafeDivide` des deux côtés. Couleurs, échelles et angles
+> des 3 paliers **inchangés**.
+> ⚠️ **Le scale-punch reste absent** — c'est toujours du J14. Et à `Hitmarker_BodyDuration = 0.12 s`,
+> le fondu de sortie ne dure que **0.09 s** : si l'effet ne se lit pas, le curseur est la **durée
+> du palier**, pas `HitmarkerFadeInTime`.
 >
 > **Contradiction de doc, tranchée.** `SPEC_COMBAT §5.3` donne le hitmarker de **headshot** en
 > `OD_Magenta_Player` pivoté 45°, alors que §3.9 réserve ce traitement au palier **Kill** et met

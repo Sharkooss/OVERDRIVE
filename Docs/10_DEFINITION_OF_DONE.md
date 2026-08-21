@@ -48,7 +48,7 @@ Supprimer une feature qui ne fonctionne pas n'est pas un échec, c'est la métho
 | **1** | Le joueur joue 5 minutes sans aucun contenu. Le mouvement est-il amusant ? | Gate S1 | ✅ **OUI** — 5 min jouées par Louis, « sans souci », avec sprint + saut + air strafe seuls | 2026-08-19 (J3) |
 | **2** | Peut-il atteindre une vitesse élevée en maîtrisant plusieurs mécaniques ? | Gate S1 | ✅ **OUI** — validé sur les **6** mécaniques (sprint, saut, air strafe, slide, dash, wall ride) après le retune du momentum à `800 / 0.25` : « tout marche correctement ». *Pic de vitesse non relevé — à chiffrer au premier passage de score (J18).* | 2026-08-19 (J7) |
 | **3** | Est-il plus intéressant de tuer un ennemi en mouvement que de s'arrêter ? | Gate S2 | | |
-| **4** | Un headshot procure-t-il une vraie satisfaction ? | Gate S2 | | |
+| **4** | Un headshot procure-t-il une vraie satisfaction ? | Gate S2 | ✅ **OUI** — hitmarker à 3 paliers, hit-stop 0.06 s et `S_Laser_Hit_Head_01` joués manche en main : « c'est good, j'ai testé, ça me convient ». Les trois retours (visuel / temporel / sonore) sont livrés au J10bis + J11 | 2026-08-21 |
 | **5** | Un impact ennemi fait-il réellement *ressentir* une erreur ? | Gate S2 | | |
 | **6** | Le joueur comprend-il pourquoi il obtient A plutôt que S ? | Gate S3 | | |
 | **7** | Le loot donne-t-il envie de continuer ? | Gate S3 | | |

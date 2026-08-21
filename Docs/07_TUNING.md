@@ -527,22 +527,40 @@ détente sur des murs paie en style — pas en temps d'attente. Si la jauge ne m
 | Clé | Valeur | Unité | Statut | Note |
 |---|---|---|---|---|
 | `Melee_Damage` | 60 | pv | À CALIBRER | |
-| `Melee_Range` | 220 | uu | À CALIBRER | |
-| `Melee_Radius` | 60 | uu | À CALIBRER | sphere trace |
+| `Melee_Range` | **400** | uu | **VALIDÉ** | 220 → 400 au 5ᵉ playtest : *« il faut vraiment être collé, avec la vitesse ça casse un peu le rythme »* |
+| `Melee_Radius` | **120** | uu | **VALIDÉ** | sphere trace — 60 → 120. **Portée utile = `Range + Radius + rayon de la cible`**, soit ~590 uu contre ~350 : on peut frapper en passant au lieu de devoir s'arrêter. ⚠️ Le trace ne teste **aucune occlusion** (même choix qu'au J8nonies pour le laser) : à très grand rayon on finirait par frapper à travers une cloison fine. 120 est le plafond raisonnable sur un module de grille |
 | `Melee_Cooldown` | 0.55 | s | À CALIBRER | |
 | `Melee_WindupTime` | 0.06 | s | À CALIBRER | quasi instantané |
-| `Melee_Knockback` | 3500 | uu/s | À CALIBRER | **très fort (GDD §24)** |
-| `Melee_KnockbackUp` | 300 | uu/s | À CALIBRER | légère composante verticale |
+| `Melee_Knockback` | **2700** | uu/s | **VALIDÉ** | **norme purement HORIZONTALE** (`D63`). ⚠️ **Ne pas lire cette valeur comme « la force »** : la portée dépend d'elle **et** de `Knockback_AirDrag`. À `k = 2.5` il fallait 5500 pour 1720 uu ; à `k = 0.6` il suffit de **2700 pour 2342 uu**. La chute du nombre est une baisse de la traînée, pas de la force (`D65`) |
+| `Melee_KnockbackUp` | **600** | uu/s | **VALIDÉ** | **plancher vertical**, appliqué quelle que soit la visée. 300 → 600 au `D65` : à 300 l'apex faisait 46 uu, l'arc était **invisible** et l'éjection rasait le sol. À 600 : `t_air = 1.22 s`, apex **184 uu**. C'est aussi lui qui fixe le temps de vol, donc la cible de `1/Knockback_AirDrag` |
+| `Melee_KnockbackPitchBoost` | 500 | uu/s | **VALIDÉ** | **`D64`** — vertical **ajouté** proportionnellement à `sin(pitch de visée)`, borné à `[0°, 90°]` : viser à plat n'ajoute rien, viser le zénith ajoute la clé entière. C'est le curseur de *« il rase un peu trop le sol quand on vise haut »*. **Il ne retire jamais rien à l'horizontale** — les deux axes sont indépendants, c'est ce qui empêche `D63` de revenir. Visée pleine hauteur : `Z = 800 uu/s`, apex **326 uu**, vol 1.63 s (contre 4900 uu avant `D63`) |
 | `Melee_HitStop` | 0.06 | s | À CALIBRER | time dilation 0.05 |
-| `WallSlam_MinImpactSpeed` | 1500 | uu/s | À CALIBRER | seuil de dégâts muraux |
+| `WallSlam_MinImpactSpeed` | **700** | uu/s | **VALIDÉ** | seuil de dégâts muraux. 1500 → 900 (`D61`) → **700** (`D65`) : il doit rester **sous la vitesse de fin de vol la plus basse** (702 uu/s au zénith), sinon le slam cesse silencieusement de fonctionner en fin de trajectoire de lob. Contrôle : `Melee_Knockback × e^(−AirDrag × t_air_max)` |
 | `WallSlam_Damage` | 200 | pv | À CALIBRER | **tue tout sauf le Tank** |
 | `WallSlam_DamagePerSpeed` | 0.08 | pv / (uu/s) | À CALIBRER | **pente** : dégâts = `Speed × cette valeur` |
-| `Knockback_MaxFlightTime` | 1.2 | s | À CALIBRER | durée max de l'état « en vol » vulnérable au slam |
-| `Knockback_RecoverTime` | 0.8 | s | À CALIBRER | relevé après atterrissage sans impact mural |
-| `Melee_SelfPropulsion` | 0 | uu/s | EXPÉRIMENTAL | hors MVP (GDD §26) |
+| `Knockback_MaxFlightTime` | **2.5** | s | À CALIBRER | durée max de l'état « en vol » vulnérable au slam. **C'est un anti-blocage, pas un curseur de gameplay** (`SPEC_COMBAT §7.4`) : il doit rester **au-dessus** du temps de vol le plus long (2.24 s au zénith), sinon il coupe la fenêtre de slam en plein vol. Relevé de 1.2 au `D65`, quand `Melee_KnockbackUp` a doublé |
+| `Knockback_RecoverTime` | 0.8 | s | **INACTIVE** | relevé après atterrissage sans impact mural — **aucune anim de relevé n'existe (J13)**, la clé n'est lue par personne |
+| `Melee_SelfPropulsion` | 0 | uu/s | EXPÉRIMENTAL | hors MVP (GDD §26) — **lue par personne** |
 
 > **Précision** : `WallSlam_Damage` est le **plafond**, `WallSlam_DamagePerSpeed` la **pente**.
 > Formule : `Damage = Min(WallSlam_Damage, ImpactSpeed × WallSlam_DamagePerSpeed)`.
+
+> **Où vivent ces clés — J11, 2026-08-21.** Le melee n'a **pas** de DataAsset, et n'en a jamais eu
+> dans `08_DATA_SCHEMAS`. Les 8 clés `Melee_*` sont des variables `Instance Editable` catégorie
+> `Melee` sur **`BPC_Melee`** ; les clés de knockback reçu vivent sur **`BPC_KnockbackReceiver`**,
+> catégorie `Knockback`. C'est la seconde voie prévue par **R3** (« DataAssets **ou** variables
+> `Instance Editable` + `Category` »), précédent `BPC_Heat.StyleLossHeatPerSecond` au J9.
+> ⚠️ Elles sont écrites **sur le template SCS de l'hôte autant que sur le CDO** (`12_PIEGES §5.42`)
+> et **relues sur l'instance PIE**, jamais sur l'asset seul.
+>
+> **`D60`** — `WallSlam_MinImpactSpeed` ne garde **plus** le décollage : c'est `Knockback_MinImpulse`
+> (§13) qui le fait, et elle ne garde plus que les **dégâts muraux**. Les deux clés existaient et
+> disaient la même chose. Voir `SPEC_COMBAT §7.2`.
+>
+> ⚠️ **Aucune de ces valeurs n'a été jouée.** Les 4 curseurs les plus probables au premier playtest :
+> `Melee_Range` (220 — court, c'est volontaire), `Melee_Knockback` (3500 — le seul qui décide si le
+> wall slam est spectaculaire ou mou), `Melee_Cooldown` (0.55) et `WallSlam_DamagePerSpeed` (0.08 —
+> à 3500 uu/s il plafonne déjà à `WallSlam_Damage`, donc **la pente ne se voit pas encore**).
 
 > **`Corpse_LifeSpan` a été supprimée** (`11_ARBITRAGES D24`). Il n'y a pas de cadavre :
 > à la mort, l'ennemi joue un dissolve puis est détruit. Le **seul** délai est
@@ -641,10 +659,29 @@ de validation, pas le chiffre.
 
 | Clé | Valeur | Unité | Statut | Note |
 |---|---|---|---|---|
-| `Knockback_MinImpulse` | 800 | uu/s | À CALIBRER | sous ce seuil, l'ennemi est bousculé mais n'entre pas dans l'état « en vol » slammable |
+| `Knockback_MinImpulse` | 800 | uu/s | À CALIBRER | sous ce seuil, l'ennemi est bousculé mais n'entre pas dans l'état « en vol » slammable — **c'est cette clé qui garde le décollage, pas `WallSlam_MinImpactSpeed` (`D60`)** |
+| `Knockback_AirDrag` | **0.6** | /s | **VALIDÉ** | **`D61`** puis **`D65`** — frottement latéral pendant le vol (`CMC.FallingLateralFriction`), décroissance exponentielle `v(t) = v₀·e^(−k·t)`. ⚠️ **Cette clé ne se règle pas seule : elle se règle CONTRE le temps de vol.** Constante de temps horizontale = `1/k`. Si `1/k ≪ t_air`, l'horizontale meurt avant la fin du vol et la trajectoire cesse d'être une parabole — l'ennemi s'arrête en X, finit de monter, puis **retombe à la verticale**. C'est ce qui s'est passé à `2.5` (`1/k = 0.4 s` contre `t_air = 1.6 s`). **Règle : viser `1/k ≥ t_air`**, ici `1/0.6 = 1.67 s ≥ 1.22 s`. |
 | `WallSlam_MaxNormalZ` | 0.4 | — | À CALIBRER | `abs(Hit.Normal.Z)` au-dessus de cette valeur = sol ou plafond → aucun dégât de slam |
 
 Les dégâts eux-mêmes restent en §12 (`WallSlam_Damage`, `WallSlam_DamagePerSpeed`, `WallSlam_MinImpactSpeed`).
+
+> ⚠️ **`D62` — ces 6 clés vivent dans `PDA_EnemyData`, PAS sur `BPC_KnockbackReceiver`.**
+> `Knockback_AirDrag` · `Knockback_MinImpulse` · `Knockback_MaxFlightTime` ·
+> `WallSlam_MinImpactSpeed` · `WallSlam_Damage` · `WallSlam_DamagePerSpeed` sont des propriétés de
+> `PDA_EnemyData` (`08_DATA_SCHEMAS §3`), lues au `BeginPlay` par `BPC_KnockbackReceiver.CacheRefs`.
+> Les variables du composant sont des **caches**, non `Instance Editable` : **on ne les règle pas
+> dans l'inspecteur, on règle `DA_Enemy_Grunt`.**
+>
+> **Pourquoi.** Un acteur déjà posé dans un niveau **fige sa copie** des défauts d'un composant au
+> moment où on le lui ajoute ; changer le défaut de classe ensuite ne l'atteint plus jamais, et PIE
+> clone le monde éditeur. Mesuré au J11 : les 6 Grunts du sandbox lisaient encore `AirDrag = 0` et
+> `MinImpactSpeed = 1500` alors que le CDO *et* le template disaient `2.5` et `900`. Détail complet :
+> `12_PIEGES §5.75`. C'est aussi ce qu'exigeait déjà `10_DEFINITION_OF_DONE §5` — *« ses stats sont
+> dans son `DA_Enemy_*`, pas dans le BP »*.
+>
+> Corollaire de design, et il est bienvenu : **la traînée devient per-ennemi.** Le Tank (J17) pourra
+> freiner plus fort que le Grunt — c'est exactement « grand et lourd ».
+> `WallSlam_MaxNormalZ` reste sur le composant : c'est une règle de **géométrie**, pas une stat.
 
 ### Boss
 
@@ -834,6 +871,9 @@ Modificateurs de gameplay (Rare/Epic uniquement) : `Dash Recharge on Kill` (−0
 | `HitStop_Headshot` | 0.05 | s | À CALIBRER |
 | `HitStop_TimeDilation` | 0.05 | — | À CALIBRER |
 | `HitStop_HeadshotPriority` | 10 | — | **FIXE** — barème de `SPEC_COMBAT §5.4` (`WallSlam = 20`, `Boss = 30`). Pas un curseur |
+| `HitmarkerFadeInTime` | 0.03 | s | **`D66`** — durée du fondu **d'entrée** du hitmarker (`WBP_Hitmarker`, cat. `Feedback|Hitmarker`). Le fondu **de sortie** occupe tout le reste de la durée du palier, il n'a donc pas de clé propre. ⚠️ **Sans underscore** (`12_PIEGES §5.71`). Si le fondu ne se voit pas, le curseur n'est pas celui-ci mais `Hitmarker_*Duration` — à 0.12 s (body) il ne reste que 0.09 s de sortie |
+| `HeatBarFillSpeed` | 9.0 | /s | **`D66`** — vitesse d'`FInterpTo` du remplissage de la jauge de chaleur (`WBP_HeatBar`). La valeur reçue de `BPC_Heat` devient une **cible** ; `DisplayRatio` la rejoint en douceur et chaque bloc se teinte progressivement (`Lerp(Color_Empty → ActiveColor)`) au lieu de s'allumer d'un coup. Monter = plus sec, descendre = plus mou |
+| `HitStopMeleePriority` | 20 | — | **FIXE** — même barème, palier `melee / wall slam`. Ajoutée au J11 sur `PC_Overdrive`, catégorie `Feedback`. ⚠️ **Sans underscore**, volontairement : `12_PIEGES §5.71` — un `_` rend le `type_id` du getter indevinable |
 | `Restart_FadeDuration` | 0.15 | s | À CALIBRER — **le restart doit être quasi instantané** |
 
 > **Les 3 clés `HitStop_*` de tir vivent sur `PC_Overdrive`** (catégorie `Feedback|HitStop`), pas sur
@@ -1110,4 +1150,16 @@ Cf. `Docs/11_ARBITRAGES.md D1` pour la règle complète de portée des données.
 | 2026-08-19 | `WallJump_AwayVelocity` (§9) | `700` | **`1000`** | **Playtest J6** : « se décoller un peu plus du mur » (**D48**) | À CALIBRER |
 | 2026-08-19 | `WallRide_CameraTiltSpeed` (§9) | — | `10` | J6 : le roulis a besoin d'une vitesse d'interpolation, la clé n'existait nulle part (**D49**) | À CALIBRER |
 | 2026-08-20 | `Dash_RequiresSurfaceTouch` (§8) | — | `true` | **Retour de Louis manche en main (J8quinquies)** : « sur un long saut on ne puisse pas spam les dash […] là on peut limite voler en spammant les dash ». Nouvelle clé, filet de sécurité si le playtest rejette la règle (**D57**) | À CALIBRER |
+| 2026-08-21 | `Melee_Knockback` (§12) | `3500` | `2800` → `4500` → `5500` → **`2700`** | **J11, 4 playtests.** La clé a fait l'aller-retour parce que sa **signification** a changé deux fois : `D63` a sorti le pitch de la direction (tout part dans la distance), puis `D65` a divisé la traînée par 4 (il en faut donc bien moins). Lire cette valeur seule ne dit rien — elle se lit **avec `Knockback_AirDrag`** | **VALIDÉ** |
+| 2026-08-21 | `Melee_KnockbackUp` (§12) | `300` | **`600`** | **J11 `D65`** : à 300 l'apex faisait 46 uu, l'arc était invisible et l'éjection rasait le sol | **VALIDÉ** |
+| 2026-08-21 | `Melee_KnockbackPitchBoost` (§12) | — | **`500`** | **J11 `D64`** : *« un peu plus de verticalité, il rase un peu trop le sol quand on vise haut »*. Vertical **ajouté** selon `sin(pitch)`, borné par la clé — jamais retiré à l'horizontale | **VALIDÉ** |
+| 2026-08-21 | `Knockback_AirDrag` (§13) | — | `2.5` → **`0.6`** | **J11 `D61` puis `D65`.** Créée pour donner du poids (`FallingLateralFriction` valait 0 : vitesse **constante** en vol). Puis divisée par 4 : à 2.5 la constante de temps (0.4 s) était 4× plus courte que le vol, l'horizontale mourait avant la fin et la trajectoire n'était plus une parabole. **Règle : `1/AirDrag ≥ t_air`** | **VALIDÉ** |
+| 2026-08-21 | `Knockback_MaxFlightTime` (§12) | `1.2` | **`2.5`** | **J11 `D65`** : anti-blocage, pas un curseur — doit dépasser le vol le plus long (2.24 s au zénith), sinon il coupe la fenêtre de slam en plein vol | À CALIBRER |
+| 2026-08-21 | `WallSlam_MinImpactSpeed` (§12) | `1500` | `900` → **`700`** | **J11 `D61`/`D65`** : doit rester **sous la vitesse de fin de vol la plus basse** (702 uu/s), sinon le slam cesse silencieusement de marcher en fin de lob | **VALIDÉ** |
+| 2026-08-21 | `Melee_Range` (§12) | `220` | **`400`** | **J11 `D66`, playtest** : *« il faut vraiment être collé, avec la vitesse ça casse un peu le rythme »* | **VALIDÉ** |
+| 2026-08-21 | `Melee_Radius` (§12) | `60` | **`120`** | **J11 `D66`** : portée utile = `Range + Radius + rayon cible`, soit ~350 → **~590 uu**. Plafond raisonnable — le trace ne teste aucune occlusion | **VALIDÉ** |
+| 2026-08-21 | `Knockback_RecoverTime` (§12) | `0.8` | *(inchangé)* | **J11** : passe **`INACTIVE`** — aucune anim de relevé n'existe (J13), la clé n'est lue par personne. Écrit plutôt que laissé croire qu'elle règle quelque chose (`12_PIEGES §6.24`) | INACTIVE |
+| 2026-08-21 | `HitStopMeleePriority` (§16) | — | **`20`** | **J11** : barème `SPEC_COMBAT §5.4` (`Headshot 10 · WallSlam 20 · Boss 30`). **FIXE**, pas un curseur | FIXE |
+| 2026-08-21 | `HitmarkerFadeInTime` (§16) | — | **`0.03`** | **J11 `D66`** : fondu d'entrée du hitmarker. Le fondu de sortie prend tout le reste du palier | À CALIBRER |
+| 2026-08-21 | `HeatBarFillSpeed` (§16) | — | **`9.0`** | **J11 `D66`** : vitesse d'`FInterpTo` du remplissage de la jauge de chaleur | À CALIBRER |
 | — | — | — | — | *(à remplir au prochain playtest)* | — |

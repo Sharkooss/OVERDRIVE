@@ -610,8 +610,11 @@ DoMeleeTrace():
 ### 7.2 Application (joueur) puis réception (ennemi)
 ```
 ApplyMeleeHit(Hit):                                        // BPC_Melee
-    Dir = Camera.ForwardVector.Normalize()                 // la CAMÉRA, pas Player→Enemy
-    Impulse = Dir * Melee_Knockback + Up * Melee_KnockbackUp                 // 07_TUNING §12
+    Dir  = MakeRotator(Pitch=0, Yaw=ControlRotation.Yaw, Roll=0).ForwardVector  // D63 : YAW SEUL
+    Lift = Melee_KnockbackPitchBoost * sin(Clamp(NormalizeAxis(Pitch), 0, 90))  // D64, 07_TUNING §12
+    Impulse = MakeVector(Dir.X * Melee_Knockback,                               // les deux axes sont
+                         Dir.Y * Melee_Knockback,                               // INDÉPENDANTS
+                         Melee_KnockbackUp + Lift)
     Info = S_DamageInfo { Amount = Melee_Damage, Type = Melee, HitLocation/Normal/Bone = Hit.*,
                           Instigator = Player, KnockbackImpulse = Impulse, SpeedPenaltyPercent = 0 }
     BPI_Damageable.ApplyDamage(Hit.Actor, Info)                              // dégâts d'abord
@@ -623,8 +626,8 @@ ApplyMeleeHit(Hit):                                        // BPC_Melee
 
 ReceiveKnockback(Impulse, Instigator):                     // BPC_KnockbackReceiver, sur BP_EnemyBase
     Final = Impulse * (1 - PDA_EnemyData.KnockbackResistance)                // 0–1, 08_DATA_SCHEMAS §3
-    if (Final.Size() < WallSlam_MinImpactSpeed): PlayStagger(); return       // 07_TUNING §12 — cf. §7.4
-    AIController.BrainComponent.StopLogic("Knockback"); SetMovementMode(Falling)
+    if (Final.Size() < Knockback_MinImpulse): PlayStagger(); return          // 07_TUNING §13 — cf. §7.4
+    AIController.BrainComponent.StopLogic("Knockback")
     LaunchCharacter(Final, XYOverride=true, ZOverride=true)
     bIsAirborneFromKnockback = true; bSlamConsumed = false
     EnableVelocityTracking()                                                 // Tick local, §13.6
@@ -632,6 +635,82 @@ ReceiveKnockback(Impulse, Instigator):                     // BPC_KnockbackRecei
 ```
 La direction vient de **la caméra** : le joueur vise le mur, pas l'ennemi. C'est ce qui rend la mécanique
 *pilotable*. Variables du receiver : `bIsAirborneFromKnockback` · `LastFrameVelocity` · `bSlamConsumed`.
+
+> **`D63` (2026-08-21, 2ᵉ playtest) — la direction du knockback est le YAW seul, jamais le pitch.**
+> *« Quand je l'envoie à la verticale, genre je regarde le ciel, il part méga super haut. »*
+> Ce n'était pas un cas limite : c'était **cette formule appliquée littéralement**. Nez au zénith,
+> `Camera.ForwardVector = (0,0,1)`, donc `Impulse.Z = Melee_Knockback + Melee_KnockbackUp`. Et
+> `Knockback_AirDrag` (`D61`) ne freine que le **latéral** — la verticale n'a que la gravité :
+> à 3100 uu/s vers le haut, l'apex est à **~49 m**.
+>
+> Le pitch est retiré de la direction : `Dir = MakeRotator(0, ControlRotation.Yaw, 0).ForwardVector`.
+> **`Melee_KnockbackUp` devient la seule source de vertical**, donc le temps de vol est constant
+> (~0.61 s) quel que soit le regard. Trois conséquences, toutes voulues :
+> 1. **Le bug disparaît par construction**, pas par un clamp qu'on pourrait mal calibrer.
+> 2. **Toute l'impulsion part dans la distance** — c'est ce qui a permis de passer `Melee_Knockback`
+>    à 4500 pour répondre à *« pas assez de recul »* sans rallonger d'une milliseconde le temps de vol.
+> 3. **Le vol redevient prévisible**, donc le wall slam redevient visable.
+>
+> ⚠️ **Ne rien perdre de vue** : un mur se vise au **yaw** — `§7.3` exclut déjà sols et plafonds du
+> slam via `WallSlam_MaxNormalZ`. Le **trace**, lui, reste sur la caméra complète (pitch compris) :
+> on doit pouvoir frapper un ennemi en contrebas ou en surplomb. C'est la **direction de projection**
+> qui est horizontale, pas la portée du coup.
+
+> **`D64` (2026-08-21, 3ᵉ playtest) — le pitch revient, mais sur l'axe Z seulement.**
+> *« Un peu plus de verticalité, il rase un peu trop le sol quand on vise haut. »* `D63` avait
+> supprimé toute influence du regard vertical ; c'était trop absolu.
+>
+> Le pitch alimente désormais **un terme additif sur Z**, jamais la direction :
+> `Lift = Melee_KnockbackPitchBoost × sin(Clamp(NormalizeAxis(Pitch), 0°, 90°))`.
+> **Les deux axes sont indépendants** — c'est toute la différence avec la formule d'origine, et
+> c'est ce qui empêche `D63` de revenir :
+> - viser haut **ajoute** de la hauteur, sans jamais **retirer** de l'horizontale ;
+> - le vertical est **borné par une clé**, pas par un angle à recalibrer : monter
+>   `Melee_Knockback` ne peut plus faire décoller personne ;
+> - viser **vers le bas** n'ajoute rien (`Clamp` à 0) — on n'enterre pas un ennemi dans un sol qui,
+>   de toute façon, ne slamme pas.
+>
+> Repères : visée à plat → `Z = 300`, apex 46 uu · à 45° → `Z = 654`, apex 218 uu ·
+> au zénith → `Z = 800`, apex **326 uu**. À comparer aux **4900 uu** de la formule d'origine.
+>
+> ⚠️ **Piège d'écriture rencontré ici** (`12_PIEGES §5.76`) : la forme
+> `Up × (KnockbackUp + Lift)` faisait résoudre l'addition en nœud `vector+vector` **à pins
+> flottants**, avec une promotion float→vecteur implicite entre les deux. Le résultat était
+> peut-être juste — et « peut-être » n'est pas une réponse. Remplacé par un **`MakeVector`
+> explicite** : 3 entrées flottantes, une sortie Vector, plus aucune promotion à interpréter.
+
+> **`D60` (2026-08-21, J11) — deux clés disaient la même chose.** Cette garde de décollage utilisait
+> `WallSlam_MinImpactSpeed` (1500), alors que `07_TUNING §13` définit `Knockback_MinImpulse` (800)
+> comme littéralement *« sous ce seuil, l'ennemi est bousculé mais n'entre pas dans l'état en vol
+> slammable »*. Deux vérités concurrentes sur la même question, exactement ce que **R3** existe pour
+> empêcher. Tranché : **`Knockback_MinImpulse` garde le décollage (§7.2), `WallSlam_MinImpactSpeed`
+> garde les dégâts muraux (§7.3).** Les deux clés sont désormais distinctes *et* utilisées.
+>
+> **Écarts d'implémentation du J11, assumés :**
+> - **Pas de `SetMovementMode(Falling)`** — `UCharacterMovementComponent::HandlePendingLaunch()`
+>   le fait déjà après avoir appliqué la vélocité. L'appeler nous-mêmes serait redondant.
+> - **Pas de `StopLogic`** — aucun `AIController` n'existe avant le **J13**. La ligne reste dans le
+>   pseudo-code ci-dessus parce qu'elle redeviendra vraie ; elle n'est simplement pas encore câblée.
+> - **`D61` — le vol est freiné, il n'est pas balistique.** Au décollage, `Knockback_AirDrag` est
+>   poussée dans **`CMC.FallingLateralFriction`** (0 par défaut, donc **aucun freinage horizontal**
+>   en `MOVE_Falling` sans input) et **restaurée** à sa valeur d'origine en fin de fenêtre. Le CMC
+>   applique `Velocity -= Friction × Velocity × dt` : décroissance **exponentielle**, donc perte
+>   maximale juste après l'impact. C'est ce qui fait la différence entre « frapper un poids plume »
+>   et « frapper un truc lourd » — la version sans traînée gardait la vitesse de départ jusqu'au sol.
+>   ⚠️ Conséquence à ne pas perdre de vue : la vitesse tombe vite, donc **`WallSlam_MinImpactSpeed`
+>   dimensionne directement la distance maximale à laquelle un mur est encore slammable.**
+> - **`D62` — les 6 clés de knockback sont des propriétés de `PDA_EnemyData`**, pas des défauts du
+>   composant : un acteur posé fige sa copie des défauts et n'en démord plus (`12_PIEGES §5.75`),
+>   et `10_DEFINITION_OF_DONE §5` l'exigeait déjà. `CacheRefs` les lit au `BeginPlay` ; les variables
+>   du composant sont des **caches**. La traînée est donc **per-ennemi** — le Tank est plus lourd.
+> - **`PlayStagger()` / `PlayBounce()` / `A_Enemy_GetUp` non câblés** — les 3 animations n'existent
+>   pas (`SPEC_ENEMIES`, set du Grunt). Les **branches** correspondantes existent et ferment la
+>   fenêtre proprement ; il ne leur manque que l'habillage. **J13.**
+> - **Le receiver lit `EnemyData` lui-même** (cast de son owner vers `BP_EnemyBase` au `BeginPlay`)
+>   au lieu d'être alimenté par l'hôte : cela évite d'insérer un nœud dans le `BeginPlay` validé de
+>   `BP_EnemyBase`. Il y pose aussi `bNotifyRigidBodyCollision` et `bUseCCD` sur la capsule —
+>   **dans le graphe**, jamais en propriété (`12_PIEGES §5.15`/`§5.56`), donc les parades §13.7 et
+>   §13.8 survivent à une recompilation.
 
 ### 7.3 Impact mural & dégâts
 Sur `Event Hit` de `BP_EnemyBase` (`Simulation Generates Hit Events` = **true** sur la capsule) :
@@ -659,7 +738,7 @@ OnHit(Hit):
 |---|---|
 | Fenêtre de vulnérabilité | De `LaunchCharacter` au premier de : impact mural · `Event Landed` · `Knockback_MaxFlightTime`. Pendant ce temps l'ennemi ne tire pas, ne se déplace pas, et est **relançable** par un second melee (le vol se recalcule, `bSlamConsumed` repasse à `false`). |
 | Atterrissage sans mur | `Event Landed` → **aucun** dégât de chute, `EndKnockbackWindow()`, relevé après `Knockback_RecoverTime` (`07_TUNING §12`) avec `A_Enemy_GetUp`, puis `ResumeLogic`. Le slam est raté : c'est la punition d'un mauvais angle. |
-| `KnockbackResistance` élevée (**Tank**) | L'impulsion finale passe sous `WallSlam_MinImpactSpeed` → **pas de vol**, juste `PlayStagger()` (`A_Enemy_Stagger`, IA suspendue le temps du montage). Le Tank encaisse les dégâts melee normaux. |
+| `KnockbackResistance` élevée (**Tank**) | L'impulsion finale passe sous `Knockback_MinImpulse` (**`D60`**) → **pas de vol**, juste `PlayStagger()` (`A_Enemy_Stagger`, IA suspendue le temps du montage). Le Tank encaisse les dégâts melee normaux. |
 | `bCanBeWallSlammed == false` | Vol possible si le seuil est franchi, mais l'impact mural ne fait **aucun** dégât de slam : `PlayBounce()` + SFX sourd. Réservé aux boss / cas scénarisés. |
 | Ennemi mort en vol | Le receiver se désarme et l'ennemi joue son **dissolve en l'air** (`SPEC_ENEMIES §8`) : il ne tombe pas, il ne se simule pas, il se dissout sur place pendant `Death_DissolveDuration`. Pas de slam post-mortem (double crédit de score interdit). |
 
